@@ -13,6 +13,7 @@
 #include "FasterStringFindCheck.h"
 #include "ForRangeCopyCheck.h"
 #include "ImplicitCastInLoopCheck.h"
+#include "InefficientStreamUseCheck.h"
 #include "InefficientStringConcatenationCheck.h"
 #include "TypePromotionInMathFnCheck.h"
 #include "UnnecessaryCopyInitialization.h"
@@ -31,6 +32,8 @@ public:
         "performance-for-range-copy");
     CheckFactories.registerCheck<ImplicitCastInLoopCheck>(
         "performance-implicit-cast-in-loop");
+    CheckFactories.registerCheck<InefficientStreamUseCheck>(
+        "performance-inefficient-stream-use");
     CheckFactories.registerCheck<InefficientStringConcatenationCheck>(
         "performance-inefficient-string-concatenation");
     CheckFactories.registerCheck<TypePromotionInMathFnCheck>(

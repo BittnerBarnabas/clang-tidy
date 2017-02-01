@@ -28,7 +28,7 @@ public:
   void check(const ast_matchers::MatchFinder::MatchResult &Result) override;
 
 private:
-  std::string getEscapedString(const StringRef &strRef);
+  static inline std::string getEscapedString(const StringRef &strRef);
 };
 
 } // namespace performance

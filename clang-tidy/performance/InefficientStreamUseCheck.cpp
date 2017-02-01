@@ -8,8 +8,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "InefficientStreamUseCheck.h"
-#include "clang/AST/ASTContext.h"
-#include "clang/ASTMatchers/ASTMatchFinder.h"
 
 using namespace clang::ast_matchers;
 
@@ -18,13 +16,13 @@ namespace tidy {
 namespace performance {
 
 void InefficientStreamUseCheck::registerMatchers(MatchFinder *Finder) {
-  const auto ImplicitCastDestination =
+  const auto ImplicitCastFromConstCharPtr =
       hasImplicitDestinationType(asString("const char *"));
-  const auto ImplicitCastSource = hasSourceExpression(
+  const auto ImplicitCastToStringLiteral = hasSourceExpression(
       stringLiteral(hasSize(1)).bind("sourceStringLiteral"));
-  const auto CharArrayToCharImplicitCast =
-      implicitCastExpr(ImplicitCastSource, ImplicitCastDestination,
-                       hasAncestor(cxxOperatorCallExpr()));
+  const auto CharArrayToCharImplicitCast = implicitCastExpr(
+      ImplicitCastFromConstCharPtr, ImplicitCastToStringLiteral,
+      hasAncestor(cxxOperatorCallExpr()));
 
   const auto StdEndlineFunctionReference = ignoringImpCasts(
       declRefExpr(hasDeclaration(functionDecl(hasName("std::endl"))))
@@ -45,15 +43,17 @@ void InefficientStreamUseCheck::check(const MatchFinder::MatchResult &Result) {
       Result.Nodes.getNodeAs<StringLiteral>("sourceStringLiteral");
   const auto *EndlineRef = Result.Nodes.getNodeAs<DeclRefExpr>("endline");
 
-  if (ToCharCastedString != nullptr) {
-    std::string buf("\'");
-    buf.append(getEscapedString(ToCharCastedString->getString().data()))
-        .append("\'");
+  if (ToCharCastedString) {
+    const std::string ReplacementSuggestion =
+        (Twine{"\'"} +
+         Twine{getEscapedString(ToCharCastedString->getString())} + Twine{"\'"})
+            .str();
     diag(ToCharCastedString->getExprLoc(),
          "Inefficient cast from const "
          "char[2] to const char *, consider "
-         "using ' '")
-        << FixItHint::CreateReplacement(ToCharCastedString->getExprLoc(), buf);
+         "using a character literal")
+        << FixItHint::CreateReplacement(ToCharCastedString->getExprLoc(),
+                                        ReplacementSuggestion);
   } else {
     diag(
         EndlineRef->getExprLoc(),

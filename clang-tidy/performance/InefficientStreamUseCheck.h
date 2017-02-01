@@ -16,7 +16,9 @@ namespace clang {
 namespace tidy {
 namespace performance {
 
-/// FIXME: Write a short description.
+/// This checker is to warn about the performance issues arising from implicit
+/// casting const char[2] to const char *, and also repeated use of std::endl
+/// function.
 ///
 /// For the user-facing documentation see:
 /// http://clang.llvm.org/extra/clang-tidy/checks/performance-inefficient-stream-use.html

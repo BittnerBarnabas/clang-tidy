@@ -15,6 +15,30 @@ namespace clang {
 namespace tidy {
 namespace performance {
 
+static inline std::string
+getEscapedString(StringRef StrRef) {
+  std::string Tmp;
+  switch (StrRef.str()[0]) {
+  case '\n':Tmp = "\\n";
+    break;
+  case '\t':Tmp = "\\t";
+    break;
+  case '\a':Tmp = "\\a";
+    break;
+  case '\b':Tmp = "\\b";
+    break;
+  case '\f':Tmp = "\\f";
+    break;
+  case '\r':Tmp = "\\r";
+    break;
+  case '\v':Tmp = "\\v";
+    break;
+  case '\'':Tmp = "\\'";
+    break;
+  default:Tmp = StrRef.str()[0];
+  }
+  return Tmp;
+}
 void InefficientStreamUseCheck::registerMatchers(MatchFinder *Finder) {
   const auto ImplicitCastFromConstCharPtr =
       hasImplicitDestinationType(asString("const char *"));
@@ -45,13 +69,12 @@ void InefficientStreamUseCheck::check(const MatchFinder::MatchResult &Result) {
 
   if (ToCharCastedString) {
     const std::string ReplacementSuggestion =
-        (Twine{"\'"} +
-         Twine{getEscapedString(ToCharCastedString->getString())} + Twine{"\'"})
+        (Twine{"\'"} + getEscapedString(ToCharCastedString->getString()) + "\'")
             .str();
     diag(ToCharCastedString->getExprLoc(),
          "Inefficient cast from const "
-         "char[2] to const char *, consider "
-         "using a character literal")
+             "char[2] to const char *, consider "
+             "using a character literal")
         << FixItHint::CreateReplacement(ToCharCastedString->getExprLoc(),
                                         ReplacementSuggestion);
   } else {
@@ -60,40 +83,6 @@ void InefficientStreamUseCheck::check(const MatchFinder::MatchResult &Result) {
         "Multiple std::endl use is not efficient consider using '\\n' instead.")
         << FixItHint::CreateReplacement(EndlineRef->getSourceRange(), "'\\n'");
   }
-}
-
-std::string
-InefficientStreamUseCheck::getEscapedString(const StringRef &strRef) {
-  std::string tmp;
-  switch (strRef.str()[0]) {
-  case '\n':
-    tmp = "\\n";
-    break;
-  case '\t':
-    tmp = "\\t";
-    break;
-  case '\a':
-    tmp = "\\a";
-    break;
-  case '\b':
-    tmp = "\\b";
-    break;
-  case '\f':
-    tmp = "\\f";
-    break;
-  case '\r':
-    tmp = "\\r";
-    break;
-  case '\v':
-    tmp = "\\v";
-    break;
-  case '\'':
-    tmp = "\\'";
-    break;
-  default:
-    tmp = strRef.str()[0];
-  }
-  return tmp;
 }
 
 } // namespace performance

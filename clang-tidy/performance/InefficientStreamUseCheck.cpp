@@ -15,29 +15,19 @@ namespace clang {
 namespace tidy {
 namespace performance {
 
-static inline std::string
+static inline StringRef
 getEscapedString(StringRef StrRef) {
-  std::string Tmp;
   switch (StrRef.str()[0]) {
-  case '\n':Tmp = "\\n";
-    break;
-  case '\t':Tmp = "\\t";
-    break;
-  case '\a':Tmp = "\\a";
-    break;
-  case '\b':Tmp = "\\b";
-    break;
-  case '\f':Tmp = "\\f";
-    break;
-  case '\r':Tmp = "\\r";
-    break;
-  case '\v':Tmp = "\\v";
-    break;
-  case '\'':Tmp = "\\'";
-    break;
-  default:Tmp = StrRef.str()[0];
+  case '\n': return "\\n";
+  case '\t': return "\\t";
+  case '\a': return "\\a";
+  case '\b': return "\\b";
+  case '\f': return "\\f";
+  case '\r': return "\\r";
+  case '\v': return "\\v";
+  case '\'': return "\\'";
+  default: return StrRef;
   }
-  return Tmp;
 }
 void InefficientStreamUseCheck::registerMatchers(MatchFinder *Finder) {
   const auto ImplicitCastFromConstCharPtr =

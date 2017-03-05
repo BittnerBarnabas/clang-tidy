@@ -8,8 +8,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "InefficientSharedPointerReferenceCheck.h"
-#include "clang/AST/ASTContext.h"
-#include "clang/ASTMatchers/ASTMatchFinder.h"
 
 using namespace clang::ast_matchers;
 
@@ -18,8 +16,12 @@ namespace tidy {
 namespace performance {
 
 void InefficientSharedPointerReferenceCheck::registerMatchers(MatchFinder *Finder) {
+  // This checker only makes sense for C++11 and up
+  if (!(getLangOpts().CPlusPlus11 || getLangOpts().CPlusPlus14 || getLangOpts().CPlusPlus1z))
+    return;
+
   const auto SharedPointerType =
-      qualType(hasDeclaration(classTemplateSpecializationDecl(matchesName("std::__1::shared_ptr"))));
+      qualType(hasDeclaration(classTemplateSpecializationDecl(matchesName("std::.*shared_ptr"))));
   const auto InefficientParameter =
       cxxBindTemporaryExpr(has(implicitCastExpr(hasCastKind(CK_ConstructorConversion))), hasType(SharedPointerType));
   Finder->addMatcher(callExpr(hasDescendant(InefficientParameter.bind("shared_ptr_parameter")),
@@ -29,10 +31,11 @@ void InefficientSharedPointerReferenceCheck::registerMatchers(MatchFinder *Finde
 void InefficientSharedPointerReferenceCheck::check(const MatchFinder::MatchResult &Result) {
   const auto *SharedPtrParameter = Result.Nodes.getNodeAs<CXXBindTemporaryExpr>("shared_ptr_parameter");
   const auto *Function = Result.Nodes.getNodeAs<FunctionDecl>("function");
-
   if (SharedPtrParameter && Function) {
-    diag(SharedPtrParameter->getExprLoc(), "inefficient shared_ptr cast");
-    diag(Function->getSourceRange().getBegin(), "consider using const reference or raw pointer instead of shared_ptr");
+    diag(SharedPtrParameter->getExprLoc(), "inefficient std::shared_ptr cast");
+    diag(Function->getSourceRange().getBegin(),
+         "consider using const reference or raw pointer instead of std::shared_ptr",
+         DiagnosticIDs::Note);
   }
 }
 

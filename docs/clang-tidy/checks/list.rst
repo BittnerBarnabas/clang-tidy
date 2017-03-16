@@ -122,6 +122,7 @@ Clang-Tidy Checks
    modernize-use-using
    mpi-buffer-deref
    mpi-type-mismatch
+   performance-container-default-initializer
    performance-faster-string-find
    performance-for-range-copy
    performance-implicit-cast-in-loop

@@ -16,11 +16,11 @@ namespace tidy {
 namespace performance {
 
 void InefficientSharedPointerReferenceCheck::registerMatchers(MatchFinder *Finder) {
-  // This checker only makes sense for C++11 and up
-  if (!(getLangOpts().CPlusPlus11))
+  // This checker only makes sense for C++11 and up.
+  if (!getLangOpts().CPlusPlus11)
     return;
 
-  // *. is needed because shared_ptr could be in a namespace inside std
+  // The *. regex is needed because shared_ptr could be in a namespace inside std.
   const auto SharedPointerType =
       qualType(hasDeclaration(classTemplateSpecializationDecl(matchesName("std::.*shared_ptr"))));
   const auto InefficientParameter =

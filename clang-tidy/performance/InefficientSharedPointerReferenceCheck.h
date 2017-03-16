@@ -16,7 +16,8 @@ namespace clang {
 namespace tidy {
 namespace performance {
 
-/// Implicit casting an std::shared_ptr<Derived> to std::shared_ptr<Base> in a function call is highly inefficient (where Base is a superclass of Derived).
+/// Implicit casting an std::shared_ptr<Derived> to std::shared_ptr<Base> in a
+/// function call is highly inefficient (where Base is a superclass of Derived).
 /// Instead of doing so one should consider using const & or raw pointers instead.
 ///
 /// For the user-facing documentation see:

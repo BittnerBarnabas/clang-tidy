@@ -15,29 +15,38 @@ namespace clang {
 namespace tidy {
 namespace performance {
 
-void InefficientSharedPointerReferenceCheck::registerMatchers(MatchFinder *Finder) {
+void InefficientSharedPointerReferenceCheck::registerMatchers(
+    MatchFinder *Finder) {
   // This checker only makes sense for C++11 and up.
   if (!getLangOpts().CPlusPlus11)
     return;
 
-  // The *. regex is needed because shared_ptr could be in a namespace inside std.
-  const auto SharedPointerType =
-      qualType(hasDeclaration(classTemplateSpecializationDecl(matchesName("std::.*shared_ptr"))));
-  const auto InefficientParameter =
-      cxxBindTemporaryExpr(has(implicitCastExpr(hasCastKind(CK_ConstructorConversion))), hasType(SharedPointerType));
-  Finder->addMatcher(callExpr(hasDescendant(InefficientParameter.bind("shared_ptr_parameter")),
-                              callee(functionDecl().bind("function"))), this);
+  // The *. regex is needed because shared_ptr could be in a namespace inside
+  // std.
+  const auto SharedPointerType = qualType(hasDeclaration(
+      classTemplateSpecializationDecl(matchesName("std::.*shared_ptr"))));
+  const auto InefficientParameter = cxxBindTemporaryExpr(
+      has(implicitCastExpr(hasCastKind(CK_ConstructorConversion))),
+      hasType(SharedPointerType));
+  Finder->addMatcher(
+      callExpr(hasDescendant(InefficientParameter.bind("shared_ptr_parameter")),
+               callee(functionDecl().bind("function"))),
+      this);
 }
 
-void InefficientSharedPointerReferenceCheck::check(const MatchFinder::MatchResult &Result) {
-  const auto *SharedPtrParameter = Result.Nodes.getNodeAs<CXXBindTemporaryExpr>("shared_ptr_parameter");
+void InefficientSharedPointerReferenceCheck::check(
+    const MatchFinder::MatchResult &Result) {
+  const auto *SharedPtrParameter =
+      Result.Nodes.getNodeAs<CXXBindTemporaryExpr>("shared_ptr_parameter");
   const auto *Function = Result.Nodes.getNodeAs<FunctionDecl>("function");
-  if (SharedPtrParameter && Function) {
-    diag(SharedPtrParameter->getExprLoc(), "inefficient std::shared_ptr cast");
-    diag(Function->getSourceRange().getBegin(),
-         "consider using const reference or raw pointer instead of std::shared_ptr",
-         DiagnosticIDs::Note);
-  }
+  if (!SharedPtrParameter || !Function)
+    return;
+
+  diag(SharedPtrParameter->getExprLoc(), "inefficient std::shared_ptr cast");
+  diag(Function->getSourceRange().getBegin(), "consider using const reference "
+                                              "or raw pointer instead of "
+                                              "'std::shared_ptr'",
+       DiagnosticIDs::Note);
 }
 
 } // namespace performance

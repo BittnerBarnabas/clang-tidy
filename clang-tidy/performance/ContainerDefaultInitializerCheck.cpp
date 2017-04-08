@@ -19,14 +19,13 @@ static const auto OperationsToMatchRegex = "push_back|emplace|emplace_back";
 
 static const auto ContainersToMatchRegex = "std::.*vector|std::.*map|std::.*deque";
 
-std::map<const Decl *, StringRef> DeclarationMap{};
+std::set<const Decl *> ProcessedDeclarations{};
 
 static SmallVector<StringRef, 5> getInsertionArguments(const MatchFinder::MatchResult &Result,
                                                        const CallExpr *InsertFunctionCall) {
-
   SmallVector<StringRef, 5> ArgumentsAsString;
   for (size_t I = 0, ArgCount = InsertFunctionCall->getNumArgs(); I < ArgCount; ++I) {
-    const Expr *Expr = InsertFunctionCall->getArg(I);
+    const Expr *Expr = InsertFunctionCall->getArg((unsigned int) I);
     ArgumentsAsString.push_back(Lexer::getSourceText(
         CharSourceRange::getTokenRange(Expr->getLocStart(), Expr->getLocEnd()),
         *Result.SourceManager, Result.Context->getLangOpts()));
@@ -49,7 +48,11 @@ void ContainerDefaultInitializerCheck::registerMatchers(MatchFinder *Finder) {
   const auto ContainterType = qualType(hasDeclaration(namedDecl(matchesName(ContainersToMatchRegex))));
 
   const auto
-      DeclRefExprToContainer = declRefExpr(hasDeclaration(varDecl(hasType(ContainterType)).bind("containerDecl")));
+      DeclRefExprToContainer = declRefExpr(hasDeclaration(varDecl(hasType(ContainterType),
+                                                                  has(cxxConstructExpr(hasDeclaration(
+                                                                      cxxConstructorDecl(
+                                                                          isDefaultConstructor()))))).bind(
+      "containerDecl")));
 
   const auto MemberCallExpr = cxxMemberCallExpr(HasOperationsNamedDecl,
                                                 on(DeclRefExprToContainer)).bind("memberCallExpr");
@@ -59,8 +62,9 @@ void ContainerDefaultInitializerCheck::registerMatchers(MatchFinder *Finder) {
 }
 
 void ContainerDefaultInitializerCheck::check(const MatchFinder::MatchResult &Result) {
-
-  const auto *ContainerDeclaration = Result.Nodes.getNodeAs<Decl>("containerDecl");
+  const auto *ContainerDeclaration = Result.Nodes.getNodeAs<VarDecl>("containerDecl");
+  if (ProcessedDeclarations.find(ContainerDeclaration) != ProcessedDeclarations.end())
+    return;
   const auto *MemberCallExpression = Result.Nodes.getNodeAs<CXXMemberCallExpr>("memberCallExpr");
   const auto *CompoundStatement = Result.Nodes.getNodeAs<CompoundStmt>("compoundStmt");
 
@@ -73,12 +77,18 @@ void ContainerDefaultInitializerCheck::check(const MatchFinder::MatchResult &Res
 
   CompoundStmtIterator++;
   if (auto *ptr = dyn_cast<ExprWithCleanups>(*CompoundStmtIterator)) {
-    if (isa<CXXMemberCallExpr>(ptr->getSubExpr())) {
+    auto *FirstMemberCallExpr = dyn_cast<CXXMemberCallExpr>(ptr->getSubExpr());
+    if (FirstMemberCallExpr
+        && FirstMemberCallExpr->getImplicitObjectArgument()->getReferencedDeclOfCallee() == ContainerDeclaration) {
       std::string Brf;
       llvm::raw_string_ostream Tokens{Brf};
       formatArguments(getInsertionArguments(Result, MemberCallExpression), Tokens);
 
-      diag(MemberCallExpression->getExprLoc(), Tokens.str());
+      diag(MemberCallExpression->getExprLoc(), Tokens.str())
+          << FixItHint::CreateInsertion(ContainerDeclaration->getInit()->getLocEnd().getLocWithOffset(
+              (int) ContainerDeclaration->getName().size()), (Twine{'{'} + Tokens.str() + Twine{'}'}).str());
+
+      ProcessedDeclarations.insert(ContainerDeclaration);
     }
   }
 }

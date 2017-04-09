@@ -29,14 +29,40 @@ struct InsertionCall {
   InsertionType CallType;
 };
 
+static SourceRange getRangeWithSemicolon(const MatchFinder::MatchResult &Result, const Expr *Expression) {
+  SourceRange Range{Expression->getSourceRange()};
+  int Offset = 1;
+  while (true) {
+    SourceLocation OffsetLocationEnd{
+        Expression->getLocEnd().getLocWithOffset(Offset)};
+    SourceRange RangeForString{OffsetLocationEnd};
+
+    CharSourceRange CSR = Lexer::makeFileCharRange(
+        CharSourceRange::getTokenRange(RangeForString),
+        *Result.SourceManager,
+        Result.Context->getLangOpts());
+
+    const auto SourceSnippet =
+        Lexer::getSourceText(CSR, *Result.SourceManager,
+                             Result.Context->getLangOpts());
+
+    if (SourceSnippet == ";") {
+      Range.setEnd(OffsetLocationEnd);
+      return Range;
+    } else {
+      Offset++;
+    }
+  }
+}
+
 template<unsigned int N>
 static InsertionCall<N> getInsertionArguments(const MatchFinder::MatchResult &Result,
-                                                       const CallExpr *InsertCallExpr) {
+                                              const CallExpr *InsertCallExpr) {
   SmallVector<StringRef, N> ArgumentsAsString;
   InsertionCall<N> InsertionCall;
-  if(const auto* InsertFuncDecl = InsertCallExpr->getDirectCallee()) {
+  if (const auto *InsertFuncDecl = InsertCallExpr->getDirectCallee()) {
     const auto InsertFuncName = InsertFuncDecl->getName();
-    if(InsertFuncName.contains("emplace")) {
+    if (InsertFuncName.contains("emplace")) {
       InsertionCall.CallType = InsertionType::EMPLACE;
     } else {
       InsertionCall.CallType = InsertionType::STANDARD;
@@ -56,12 +82,14 @@ static InsertionCall<N> getInsertionArguments(const MatchFinder::MatchResult &Re
 template<unsigned N>
 static void formatArguments(const InsertionCall<N> ArgumentList, llvm::raw_ostream &Stream) {
   StringRef Delimiter = "";
-  if(ArgumentList.CallType == InsertionType::EMPLACE) Stream << '{';
+  if (ArgumentList.CallType == InsertionType::EMPLACE)
+    Stream << '{';
   for (const auto &Tokens : ArgumentList.CallArguments) {
     Stream << Delimiter << Tokens;
     Delimiter = ", ";
   }
-  if(ArgumentList.CallType == InsertionType::EMPLACE) Stream << '}';
+  if (ArgumentList.CallType == InsertionType::EMPLACE)
+    Stream << '}';
 }
 
 void ContainerDefaultInitializerCheck::registerMatchers(MatchFinder *Finder) {
@@ -86,7 +114,6 @@ void ContainerDefaultInitializerCheck::check(const MatchFinder::MatchResult &Res
   const auto *ContainerDeclaration = Result.Nodes.getNodeAs<VarDecl>("containerDecl");
   if (ProcessedDeclarations.find(ContainerDeclaration) != ProcessedDeclarations.end())
     return;
-  const auto *MemberCallExpression = Result.Nodes.getNodeAs<CXXMemberCallExpr>("memberCallExpr");
   const auto *CompoundStatement = Result.Nodes.getNodeAs<CompoundStmt>("compoundStmt");
 
   const auto *CompoundStmtIterator = CompoundStatement->body_begin();
@@ -98,21 +125,39 @@ void ContainerDefaultInitializerCheck::check(const MatchFinder::MatchResult &Res
   }
 
   CompoundStmtIterator++;
-  if (auto *ptr = dyn_cast<ExprWithCleanups>(*CompoundStmtIterator)) {
+
+  std::string Brf;
+  llvm::raw_string_ostream Tokens{Brf};
+  auto HasInsertionCall = false;
+  StringRef Delimiter = "";
+
+  SmallVector<FixItHint, 5> FixitHints{};
+
+  while (auto *ptr = dyn_cast<ExprWithCleanups>(*CompoundStmtIterator)) {
     auto *FirstMemberCallExpr = dyn_cast<CXXMemberCallExpr>(ptr->getSubExpr());
     if (FirstMemberCallExpr
         && FirstMemberCallExpr->getImplicitObjectArgument()->getReferencedDeclOfCallee() == ContainerDeclaration) {
-      std::string Brf;
-      llvm::raw_string_ostream Tokens{Brf};
-      formatArguments(getInsertionArguments<5>(Result, MemberCallExpression), Tokens);
+      Tokens << Delimiter;
+      Delimiter = ", ";
+      formatArguments(getInsertionArguments<5>(Result, FirstMemberCallExpr), Tokens);
+      HasInsertionCall = true;
+      FixitHints.push_back(FixItHint::CreateRemoval(getRangeWithSemicolon(Result, FirstMemberCallExpr)));
+    } else {
+      break;
+    }
+    CompoundStmtIterator++;
+  }
 
-      diag(MemberCallExpression->getExprLoc(), Tokens.str())
-          << FixItHint::CreateInsertion(ContainerDeclaration->getInit()->getLocEnd().getLocWithOffset(
-              (int) ContainerDeclaration->getName().size()), (Twine{'{'} + Tokens.str() + Twine{'}'}).str());
-
-      ProcessedDeclarations.insert(ContainerDeclaration);
+  if (HasInsertionCall) {
+    auto DiagnosticBuilder = diag(ContainerDeclaration->getLocStart(), "Initialize containers in place you bastard")
+        << FixItHint::CreateInsertion(ContainerDeclaration->getInit()->getLocEnd().getLocWithOffset(
+            (int) ContainerDeclaration->getName().size()), (Twine{'{'} + Tokens.str() + Twine{'}'}).str());
+    for (const auto &Fixit : FixitHints) {
+      DiagnosticBuilder << Fixit;
     }
   }
+
+  ProcessedDeclarations.insert(ContainerDeclaration);
 }
 
 } // namespace performance

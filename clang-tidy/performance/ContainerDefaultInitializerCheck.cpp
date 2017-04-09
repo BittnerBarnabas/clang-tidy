@@ -21,26 +21,47 @@ static const auto ContainersToMatchRegex = "std::.*vector|std::.*map|std::.*dequ
 
 std::set<const Decl *> ProcessedDeclarations{};
 
-static SmallVector<StringRef, 5> getInsertionArguments(const MatchFinder::MatchResult &Result,
-                                                       const CallExpr *InsertFunctionCall) {
-  SmallVector<StringRef, 5> ArgumentsAsString;
-  for (size_t I = 0, ArgCount = InsertFunctionCall->getNumArgs(); I < ArgCount; ++I) {
-    const Expr *Expr = InsertFunctionCall->getArg((unsigned int) I);
+enum class InsertionType { EMPLACE, STANDARD };
+
+template<unsigned int N>
+struct InsertionCall {
+  SmallVector<StringRef, N> CallArguments;
+  InsertionType CallType;
+};
+
+template<unsigned int N>
+static InsertionCall<N> getInsertionArguments(const MatchFinder::MatchResult &Result,
+                                                       const CallExpr *InsertCallExpr) {
+  SmallVector<StringRef, N> ArgumentsAsString;
+  InsertionCall<N> InsertionCall;
+  if(const auto* InsertFuncDecl = InsertCallExpr->getDirectCallee()) {
+    const auto InsertFuncName = InsertFuncDecl->getName();
+    if(InsertFuncName.contains("emplace")) {
+      InsertionCall.CallType = InsertionType::EMPLACE;
+    } else {
+      InsertionCall.CallType = InsertionType::STANDARD;
+    }
+  }
+  for (size_t I = 0, ArgCount = InsertCallExpr->getNumArgs(); I < ArgCount; ++I) {
+    const Expr *Expr = InsertCallExpr->getArg((unsigned int) I);
     ArgumentsAsString.push_back(Lexer::getSourceText(
         CharSourceRange::getTokenRange(Expr->getLocStart(), Expr->getLocEnd()),
         *Result.SourceManager, Result.Context->getLangOpts()));
 
   }
-  return ArgumentsAsString;
+  InsertionCall.CallArguments = ArgumentsAsString;
+  return InsertionCall;
 }
 
 template<unsigned N>
-static void formatArguments(const SmallVector<StringRef, N> ArgumentList, llvm::raw_ostream &Stream) {
+static void formatArguments(const InsertionCall<N> ArgumentList, llvm::raw_ostream &Stream) {
   StringRef Delimiter = "";
-  for (const auto &Tokens : ArgumentList) {
+  if(ArgumentList.CallType == InsertionType::EMPLACE) Stream << '{';
+  for (const auto &Tokens : ArgumentList.CallArguments) {
     Stream << Delimiter << Tokens;
     Delimiter = ", ";
   }
+  if(ArgumentList.CallType == InsertionType::EMPLACE) Stream << '}';
 }
 
 void ContainerDefaultInitializerCheck::registerMatchers(MatchFinder *Finder) {
@@ -70,6 +91,7 @@ void ContainerDefaultInitializerCheck::check(const MatchFinder::MatchResult &Res
 
   const auto *CompoundStmtIterator = CompoundStatement->body_begin();
 
+  //This finds the matched container declaration.
   while (dyn_cast<DeclStmt>(*CompoundStmtIterator) == nullptr ? true :
          dyn_cast<DeclStmt>(*CompoundStmtIterator)->getSingleDecl() != ContainerDeclaration) {
     CompoundStmtIterator++;
@@ -82,7 +104,7 @@ void ContainerDefaultInitializerCheck::check(const MatchFinder::MatchResult &Res
         && FirstMemberCallExpr->getImplicitObjectArgument()->getReferencedDeclOfCallee() == ContainerDeclaration) {
       std::string Brf;
       llvm::raw_string_ostream Tokens{Brf};
-      formatArguments(getInsertionArguments(Result, MemberCallExpression), Tokens);
+      formatArguments(getInsertionArguments<5>(Result, MemberCallExpression), Tokens);
 
       diag(MemberCallExpression->getExprLoc(), Tokens.str())
           << FixItHint::CreateInsertion(ContainerDeclaration->getInit()->getLocEnd().getLocWithOffset(

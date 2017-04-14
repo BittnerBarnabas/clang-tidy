@@ -15,7 +15,7 @@ namespace clang {
 namespace tidy {
 namespace performance {
 
-static const auto OperationsToMatchRegex = "push_back|emplace|emplace_back";
+static const auto OperationsToMatchRegex = "push_back|emplace|emplace_back|insert";
 
 static const auto ContainersToMatchRegex = "std::.*vector|std::.*map|std::.*deque";
 
@@ -133,7 +133,10 @@ void ContainerDefaultInitializerCheck::check(const MatchFinder::MatchResult &Res
 
   SmallVector<FixItHint, 5> FixitHints{};
 
-  while (auto *ptr = dyn_cast<ExprWithCleanups>(*CompoundStmtIterator)) {
+  ExprWithCleanups *ptr;
+  while (CompoundStmtIterator != CompoundStatement->body_end() ?
+         (ptr = dyn_cast<ExprWithCleanups>(*CompoundStmtIterator))
+             != nullptr : false) {
     auto *FirstMemberCallExpr = dyn_cast<CXXMemberCallExpr>(ptr->getSubExpr());
     if (FirstMemberCallExpr
         && FirstMemberCallExpr->getImplicitObjectArgument()->getReferencedDeclOfCallee() == ContainerDeclaration) {
@@ -149,7 +152,7 @@ void ContainerDefaultInitializerCheck::check(const MatchFinder::MatchResult &Res
   }
 
   if (HasInsertionCall) {
-    auto DiagnosticBuilder = diag(ContainerDeclaration->getLocStart(), "Initialize containers in place you bastard")
+    auto DiagnosticBuilder = diag(ContainerDeclaration->getLocStart(), "Initialize containers in place if you can")
         << FixItHint::CreateInsertion(ContainerDeclaration->getInit()->getLocEnd().getLocWithOffset(
             (int) ContainerDeclaration->getName().size()), (Twine{'{'} + Tokens.str() + Twine{'}'}).str());
     for (const auto &Fixit : FixitHints) {

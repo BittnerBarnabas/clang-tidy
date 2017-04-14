@@ -106,12 +106,20 @@ void ContainerDefaultInitializerCheck::registerMatchers(MatchFinder *Finder) {
   const auto MemberCallExpr = cxxMemberCallExpr(HasOperationsNamedDecl,
                                                 on(DeclRefExprToContainer)).bind("memberCallExpr");
 
+  const auto MemberCallExpr2 =
+      cxxMemberCallExpr(HasOperationsNamedDecl, hasAnyArgument(expr(hasDescendant(DeclRefExprToContainer))),
+                        on(DeclRefExprToContainer)).bind("dirtyMemberCallExpr");
+
+  Finder->addMatcher(compoundStmt(forEach(exprWithCleanups(has(MemberCallExpr2)))).bind("compoundStmt"),
+                     this);
   Finder->addMatcher(compoundStmt(forEach(exprWithCleanups(has(MemberCallExpr)))).bind("compoundStmt"),
                      this);
 }
 
 void ContainerDefaultInitializerCheck::check(const MatchFinder::MatchResult &Result) {
   const auto *ContainerDeclaration = Result.Nodes.getNodeAs<VarDecl>("containerDecl");
+  const auto *DirtyMemberCall = Result.Nodes.getNodeAs<CXXMemberCallExpr>("dirtyMemberCallExpr");
+
   if (ProcessedDeclarations.find(ContainerDeclaration) != ProcessedDeclarations.end())
     return;
   const auto *CompoundStatement = Result.Nodes.getNodeAs<CompoundStmt>("compoundStmt");
@@ -134,11 +142,10 @@ void ContainerDefaultInitializerCheck::check(const MatchFinder::MatchResult &Res
   SmallVector<FixItHint, 5> FixitHints{};
 
   ExprWithCleanups *ptr;
-  while (CompoundStmtIterator != CompoundStatement->body_end() ?
-         (ptr = dyn_cast<ExprWithCleanups>(*CompoundStmtIterator))
-             != nullptr : false) {
+  while (CompoundStmtIterator != CompoundStatement->body_end()
+      && (ptr = dyn_cast<ExprWithCleanups>(*CompoundStmtIterator)) != nullptr) {
     auto *FirstMemberCallExpr = dyn_cast<CXXMemberCallExpr>(ptr->getSubExpr());
-    if (FirstMemberCallExpr
+    if (FirstMemberCallExpr && FirstMemberCallExpr != DirtyMemberCall
         && FirstMemberCallExpr->getImplicitObjectArgument()->getReferencedDeclOfCallee() == ContainerDeclaration) {
       Tokens << Delimiter;
       Delimiter = ", ";

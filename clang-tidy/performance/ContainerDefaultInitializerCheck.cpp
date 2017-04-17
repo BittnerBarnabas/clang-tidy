@@ -20,8 +20,10 @@ static const auto OperationsToMatchRegex =
 
 static const auto ContainersToMatchRegex =
     "std::.*vector|std::.*map|std::.*deque";
+
 static const std::set<StringRef> IntegralTypes =
     {"short", "unsigned short", "int", "unsigned int", "long", "unsigned long", "long long", "unsigned long long"};
+
 static const std::set<StringRef> FloatingTypes = {"float", "double", "long double"};
 
 std::set<const Decl *> ProcessedDeclarations{};
@@ -145,11 +147,11 @@ void ContainerDefaultInitializerCheck::registerMatchers(MatchFinder *Finder) {
           .bind("dirtyMemberCallExpr");
 
   Finder->addMatcher(
-      compoundStmt(forEach(exprWithCleanups(has(MemberCallExpr2))))
+      compoundStmt(eachOf(forEach(MemberCallExpr2), forEach(exprWithCleanups(has(MemberCallExpr2)))))
           .bind("compoundStmt"),
       this);
   Finder->addMatcher(
-      compoundStmt(forEach(exprWithCleanups(has(MemberCallExpr))))
+      compoundStmt(eachOf(forEach(MemberCallExpr), forEach(exprWithCleanups(has(MemberCallExpr)))))
           .bind("compoundStmt"),
       this);
 }
@@ -173,10 +175,8 @@ void ContainerDefaultInitializerCheck::check(
   const auto *CompoundStmtIterator = CompoundStatement->body_begin();
 
   // This finds the matched container declaration.
-  while (dyn_cast<DeclStmt>(*CompoundStmtIterator) == nullptr
-         ? true
-         : dyn_cast<DeclStmt>(*CompoundStmtIterator)->getSingleDecl() !=
-          ContainerDeclaration) {
+  while (!dyn_cast<DeclStmt>(*CompoundStmtIterator)
+      || dyn_cast<DeclStmt>(*CompoundStmtIterator)->getSingleDecl() != ContainerDeclaration) {
     CompoundStmtIterator++;
   }
 
@@ -190,21 +190,26 @@ void ContainerDefaultInitializerCheck::check(
   SmallVector<FixItHint, 5> FixitHints{};
   const auto ContainerTemplateType =
       ContainerTemplateSpec->getTemplateArgs()[0].getAsType();
-  ExprWithCleanups *ptr;
-  while (CompoundStmtIterator != CompoundStatement->body_end() &&
-      (ptr = dyn_cast<ExprWithCleanups>(*CompoundStmtIterator)) != nullptr) {
-    auto *FirstMemberCallExpr = dyn_cast<CXXMemberCallExpr>(ptr->getSubExpr());
-    if (FirstMemberCallExpr && FirstMemberCallExpr != DirtyMemberCall &&
-        FirstMemberCallExpr->getImplicitObjectArgument()
+
+  while (CompoundStmtIterator != CompoundStatement->body_end()) {
+    const CXXMemberCallExpr *ActualMemberCallExpr;
+    if (const auto *ptr = dyn_cast<ExprWithCleanups>(*CompoundStmtIterator)) {
+      ActualMemberCallExpr = dyn_cast<CXXMemberCallExpr>(ptr->getSubExpr());
+    } else if (!(ActualMemberCallExpr = dyn_cast<CXXMemberCallExpr>(*CompoundStmtIterator))) {
+      break;
+    }
+
+    if (ActualMemberCallExpr && ActualMemberCallExpr != DirtyMemberCall &&
+        ActualMemberCallExpr->getImplicitObjectArgument()
             ->getReferencedDeclOfCallee() == ContainerDeclaration) {
       Tokens << Delimiter;
       Delimiter = ", ";
-      formatArguments(getInsertionArguments<5>(Result, FirstMemberCallExpr,
+      formatArguments(getInsertionArguments<5>(Result, ActualMemberCallExpr,
                                                &ContainerTemplateType),
                       Tokens);
       HasInsertionCall = true;
       FixitHints.push_back(FixItHint::CreateRemoval(
-          getRangeWithSemicolon(Result, FirstMemberCallExpr)));
+          getRangeWithSemicolon(Result, ActualMemberCallExpr)));
     } else {
       break;
     }

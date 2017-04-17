@@ -7,29 +7,33 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <clang/Lex/Lexer.h>
 #include "ContainerDefaultInitializerCheck.h"
+#include <clang/Lex/Lexer.h>
 using namespace clang::ast_matchers;
 
 namespace clang {
 namespace tidy {
 namespace performance {
 
-static const auto OperationsToMatchRegex = "push_back|emplace|emplace_back|insert";
+static const auto OperationsToMatchRegex =
+    "push_back|emplace|emplace_back|insert";
 
-static const auto ContainersToMatchRegex = "std::.*vector|std::.*map|std::.*deque";
+static const auto ContainersToMatchRegex =
+    "std::.*vector|std::.*map|std::.*deque";
+static const std::set<StringRef> IntegralTypes =
+    {"short", "unsigned short", "int", "unsigned int", "long", "unsigned long", "long long", "unsigned long long"};
+static const std::set<StringRef> FloatingTypes = {"float", "double", "long double"};
 
 std::set<const Decl *> ProcessedDeclarations{};
-
 enum class InsertionType { EMPLACE, STANDARD };
 
-template<unsigned int N>
-struct InsertionCall {
-  SmallVector<StringRef, N> CallArguments;
+template<unsigned int N> struct InsertionCall {
+  SmallVector<std::string, N> CallArguments;
   InsertionType CallType;
 };
 
-static SourceRange getRangeWithSemicolon(const MatchFinder::MatchResult &Result, const Expr *Expression) {
+static SourceRange getRangeWithSemicolon(const MatchFinder::MatchResult &Result,
+                                         const Expr *Expression) {
   SourceRange Range{Expression->getSourceRange()};
   int Offset = 1;
   while (true) {
@@ -38,13 +42,11 @@ static SourceRange getRangeWithSemicolon(const MatchFinder::MatchResult &Result,
     SourceRange RangeForString{OffsetLocationEnd};
 
     CharSourceRange CSR = Lexer::makeFileCharRange(
-        CharSourceRange::getTokenRange(RangeForString),
-        *Result.SourceManager,
+        CharSourceRange::getTokenRange(RangeForString), *Result.SourceManager,
         Result.Context->getLangOpts());
 
-    const auto SourceSnippet =
-        Lexer::getSourceText(CSR, *Result.SourceManager,
-                             Result.Context->getLangOpts());
+    const auto SourceSnippet = Lexer::getSourceText(
+        CSR, *Result.SourceManager, Result.Context->getLangOpts());
 
     if (SourceSnippet == ";") {
       Range.setEnd(OffsetLocationEnd);
@@ -55,10 +57,23 @@ static SourceRange getRangeWithSemicolon(const MatchFinder::MatchResult &Result,
   }
 }
 
+static std::string getNarrowingCastStr(const QualType &CastSource, const QualType &CastDestination) {
+  if (CastSource.getAsString() == CastDestination.getAsString())
+    return "";
+  const auto DestinationStr = CastDestination.getAsString();
+  if (IntegralTypes.find(DestinationStr) != IntegralTypes.end()
+      || FloatingTypes.find(DestinationStr) != FloatingTypes.end()) {
+    return "(" + DestinationStr + ")";
+  }
+  return "";
+}
+
 template<unsigned int N>
-static InsertionCall<N> getInsertionArguments(const MatchFinder::MatchResult &Result,
-                                              const CallExpr *InsertCallExpr) {
-  SmallVector<StringRef, N> ArgumentsAsString;
+static InsertionCall<N>
+getInsertionArguments(const MatchFinder::MatchResult &Result,
+                      const CallExpr *InsertCallExpr,
+                      const QualType *typeInfo) {
+  SmallVector<std::string, N> ArgumentsAsString;
   InsertionCall<N> InsertionCall;
   if (const auto *InsertFuncDecl = InsertCallExpr->getDirectCallee()) {
     const auto InsertFuncName = InsertFuncDecl->getName();
@@ -68,19 +83,31 @@ static InsertionCall<N> getInsertionArguments(const MatchFinder::MatchResult &Re
       InsertionCall.CallType = InsertionType::STANDARD;
     }
   }
-  for (size_t I = 0, ArgCount = InsertCallExpr->getNumArgs(); I < ArgCount; ++I) {
-    const Expr *Expr = InsertCallExpr->getArg((unsigned int) I);
-    ArgumentsAsString.push_back(Lexer::getSourceText(
-        CharSourceRange::getTokenRange(Expr->getLocStart(), Expr->getLocEnd()),
-        *Result.SourceManager, Result.Context->getLangOpts()));
 
+  for (size_t I = 0, ArgCount = InsertCallExpr->getNumArgs(); I < ArgCount;
+       ++I) {
+    const auto *Expr = InsertCallExpr->getArg((unsigned int) I);
+
+    std::string ArgCastStrRef;
+    if (const auto *MatExpr = dyn_cast<MaterializeTemporaryExpr>(Expr)) {
+      ArgCastStrRef =
+          getNarrowingCastStr(MatExpr->GetTemporaryExpr()->IgnoreImpCasts()->getType().getCanonicalType(), *typeInfo);
+    }
+
+    auto ArgAsString = Lexer::getSourceText(
+        CharSourceRange::getTokenRange(Expr->getLocStart(), Expr->getLocEnd()),
+        *Result.SourceManager, Result.Context->getLangOpts());
+
+    ArgumentsAsString.push_back(ArgCastStrRef + ArgAsString.str());
   }
+
   InsertionCall.CallArguments = ArgumentsAsString;
   return InsertionCall;
 }
 
 template<unsigned N>
-static void formatArguments(const InsertionCall<N> ArgumentList, llvm::raw_ostream &Stream) {
+static void formatArguments(const InsertionCall<N> ArgumentList,
+                            llvm::raw_ostream &Stream) {
   StringRef Delimiter = "";
   if (ArgumentList.CallType == InsertionType::EMPLACE)
     Stream << '{';
@@ -93,42 +120,63 @@ static void formatArguments(const InsertionCall<N> ArgumentList, llvm::raw_ostre
 }
 
 void ContainerDefaultInitializerCheck::registerMatchers(MatchFinder *Finder) {
-  const auto HasOperationsNamedDecl = hasDeclaration(namedDecl(matchesName(OperationsToMatchRegex)));
-  const auto ContainterType = qualType(hasDeclaration(namedDecl(matchesName(ContainersToMatchRegex))));
+  const auto HasOperationsNamedDecl =
+      hasDeclaration(namedDecl(matchesName(OperationsToMatchRegex)));
+  const auto ContainterType =
+      classTemplateSpecializationDecl(matchesName(ContainersToMatchRegex))
+          .bind("containerTemplateSpecialization");
 
-  const auto
-      DeclRefExprToContainer = declRefExpr(hasDeclaration(varDecl(hasType(ContainterType),
-                                                                  has(cxxConstructExpr(hasDeclaration(
-                                                                      cxxConstructorDecl(
-                                                                          isDefaultConstructor()))))).bind(
-      "containerDecl")));
+  const auto DefaultConstructor = cxxConstructExpr(
+      hasDeclaration(cxxConstructorDecl(isDefaultConstructor())));
 
-  const auto MemberCallExpr = cxxMemberCallExpr(HasOperationsNamedDecl,
-                                                on(DeclRefExprToContainer)).bind("memberCallExpr");
+  const auto DeclRefExprToContainer = declRefExpr(
+      hasDeclaration(varDecl(hasType(ContainterType), has(DefaultConstructor))
+                         .bind("containerDecl")));
+
+  const auto MemberCallExpr =
+      cxxMemberCallExpr(HasOperationsNamedDecl, on(DeclRefExprToContainer))
+          .bind("memberCallExpr");
 
   const auto MemberCallExpr2 =
-      cxxMemberCallExpr(HasOperationsNamedDecl, hasAnyArgument(expr(hasDescendant(DeclRefExprToContainer))),
-                        on(DeclRefExprToContainer)).bind("dirtyMemberCallExpr");
+      cxxMemberCallExpr(
+          HasOperationsNamedDecl,
+          hasAnyArgument(expr(hasDescendant(DeclRefExprToContainer))),
+          on(DeclRefExprToContainer))
+          .bind("dirtyMemberCallExpr");
 
-  Finder->addMatcher(compoundStmt(forEach(exprWithCleanups(has(MemberCallExpr2)))).bind("compoundStmt"),
-                     this);
-  Finder->addMatcher(compoundStmt(forEach(exprWithCleanups(has(MemberCallExpr)))).bind("compoundStmt"),
-                     this);
+  Finder->addMatcher(
+      compoundStmt(forEach(exprWithCleanups(has(MemberCallExpr2))))
+          .bind("compoundStmt"),
+      this);
+  Finder->addMatcher(
+      compoundStmt(forEach(exprWithCleanups(has(MemberCallExpr))))
+          .bind("compoundStmt"),
+      this);
 }
 
-void ContainerDefaultInitializerCheck::check(const MatchFinder::MatchResult &Result) {
-  const auto *ContainerDeclaration = Result.Nodes.getNodeAs<VarDecl>("containerDecl");
-  const auto *DirtyMemberCall = Result.Nodes.getNodeAs<CXXMemberCallExpr>("dirtyMemberCallExpr");
+void ContainerDefaultInitializerCheck::check(
+    const MatchFinder::MatchResult &Result) {
 
-  if (ProcessedDeclarations.find(ContainerDeclaration) != ProcessedDeclarations.end())
+  const auto *ContainerDeclaration =
+      Result.Nodes.getNodeAs<VarDecl>("containerDecl");
+  if (ProcessedDeclarations.find(ContainerDeclaration) !=
+      ProcessedDeclarations.end())
     return;
-  const auto *CompoundStatement = Result.Nodes.getNodeAs<CompoundStmt>("compoundStmt");
 
+  const auto *CompoundStatement =
+      Result.Nodes.getNodeAs<CompoundStmt>("compoundStmt");
+  const auto *ContainerTemplateSpec =
+      Result.Nodes.getNodeAs<ClassTemplateSpecializationDecl>(
+          "containerTemplateSpecialization");
+  const auto *DirtyMemberCall =
+      Result.Nodes.getNodeAs<CXXMemberCallExpr>("dirtyMemberCallExpr");
   const auto *CompoundStmtIterator = CompoundStatement->body_begin();
 
-  //This finds the matched container declaration.
-  while (dyn_cast<DeclStmt>(*CompoundStmtIterator) == nullptr ? true :
-         dyn_cast<DeclStmt>(*CompoundStmtIterator)->getSingleDecl() != ContainerDeclaration) {
+  // This finds the matched container declaration.
+  while (dyn_cast<DeclStmt>(*CompoundStmtIterator) == nullptr
+         ? true
+         : dyn_cast<DeclStmt>(*CompoundStmtIterator)->getSingleDecl() !=
+          ContainerDeclaration) {
     CompoundStmtIterator++;
   }
 
@@ -140,18 +188,23 @@ void ContainerDefaultInitializerCheck::check(const MatchFinder::MatchResult &Res
   StringRef Delimiter = "";
 
   SmallVector<FixItHint, 5> FixitHints{};
-
+  const auto ContainerTemplateType =
+      ContainerTemplateSpec->getTemplateArgs()[0].getAsType();
   ExprWithCleanups *ptr;
-  while (CompoundStmtIterator != CompoundStatement->body_end()
-      && (ptr = dyn_cast<ExprWithCleanups>(*CompoundStmtIterator)) != nullptr) {
+  while (CompoundStmtIterator != CompoundStatement->body_end() &&
+      (ptr = dyn_cast<ExprWithCleanups>(*CompoundStmtIterator)) != nullptr) {
     auto *FirstMemberCallExpr = dyn_cast<CXXMemberCallExpr>(ptr->getSubExpr());
-    if (FirstMemberCallExpr && FirstMemberCallExpr != DirtyMemberCall
-        && FirstMemberCallExpr->getImplicitObjectArgument()->getReferencedDeclOfCallee() == ContainerDeclaration) {
+    if (FirstMemberCallExpr && FirstMemberCallExpr != DirtyMemberCall &&
+        FirstMemberCallExpr->getImplicitObjectArgument()
+            ->getReferencedDeclOfCallee() == ContainerDeclaration) {
       Tokens << Delimiter;
       Delimiter = ", ";
-      formatArguments(getInsertionArguments<5>(Result, FirstMemberCallExpr), Tokens);
+      formatArguments(getInsertionArguments<5>(Result, FirstMemberCallExpr,
+                                               &ContainerTemplateType),
+                      Tokens);
       HasInsertionCall = true;
-      FixitHints.push_back(FixItHint::CreateRemoval(getRangeWithSemicolon(Result, FirstMemberCallExpr)));
+      FixitHints.push_back(FixItHint::CreateRemoval(
+          getRangeWithSemicolon(Result, FirstMemberCallExpr)));
     } else {
       break;
     }
@@ -160,7 +213,7 @@ void ContainerDefaultInitializerCheck::check(const MatchFinder::MatchResult &Res
 
   if (HasInsertionCall) {
     auto DiagnosticBuilder = diag(ContainerDeclaration->getLocStart(), "Initialize containers in place if you can")
-        << FixItHint::CreateInsertion(ContainerDeclaration->getInit()->getLocEnd().getLocWithOffset(
+        << FixItHint::CreateInsertion(ContainerDeclaration->getLocEnd().getLocWithOffset(
             (int) ContainerDeclaration->getName().size()), (Twine{'{'} + Tokens.str() + Twine{'}'}).str());
     for (const auto &Fixit : FixitHints) {
       DiagnosticBuilder << Fixit;

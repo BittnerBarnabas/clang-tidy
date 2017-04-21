@@ -21,17 +21,22 @@ static const auto OperationsToMatchRegex =
 static const auto ContainersToMatchRegex =
     "std::.*vector|std::.*map|std::.*deque";
 
-static const std::set<StringRef> IntegralTypes =
-    {"short", "unsigned short", "int", "unsigned int", "long", "unsigned long", "long long", "unsigned long long"};
+static const std::set <StringRef> IntegralTypes =
+    {"bool", "char", "short", "unsigned short", "int", "unsigned int", "long", "unsigned long", "long long",
+     "unsigned long long"};
 
-static const std::set<StringRef> FloatingTypes = {"float", "double", "long double"};
+static const std::set <StringRef> FloatingTypes = {"float", "double", "long double"};
 
 std::set<const Decl *> ProcessedDeclarations{};
 enum class InsertionType { EMPLACE, STANDARD };
+enum class ContainerType { MAP, OTHER };
 
 template<unsigned int N> struct InsertionCall {
-  SmallVector<std::string, N> CallArguments;
+  SmallVector <std::string, N> CallArguments;
   InsertionType CallType;
+  QualType CallQualType;
+  ContainerType ContainerType;
+  std::string TypeAsString;
 };
 
 static SourceRange getRangeWithSemicolon(const MatchFinder::MatchResult &Result,
@@ -74,13 +79,23 @@ template<unsigned int N>
 static InsertionCall<N>
 getInsertionArguments(const MatchFinder::MatchResult &Result,
                       const CallExpr *InsertCallExpr,
-                      const QualType *typeInfo) {
-  SmallVector<std::string, N> ArgumentsAsString;
+                      const TemplateArgumentList &TemplateArguments,
+                      ContainerType ContainerType) {
+
+  const auto getSourceTextForExpr = [&](const Expr *Expression) {
+    return Lexer::getSourceText(
+        CharSourceRange::getTokenRange(Expression->getLocStart(), Expression->getLocEnd()),
+        *Result.SourceManager, Result.Context->getLangOpts());
+  };
+
+  SmallVector <std::string, N> ArgumentsAsString;
   InsertionCall<N> InsertionCall;
+  InsertionCall.ContainerType = ContainerType;
   if (const auto *InsertFuncDecl = InsertCallExpr->getDirectCallee()) {
     const auto InsertFuncName = InsertFuncDecl->getName();
     if (InsertFuncName.contains("emplace")) {
       InsertionCall.CallType = InsertionType::EMPLACE;
+      InsertionCall.CallQualType = TemplateArguments[0].getAsType();
     } else {
       InsertionCall.CallType = InsertionType::STANDARD;
     }
@@ -90,17 +105,36 @@ getInsertionArguments(const MatchFinder::MatchResult &Result,
        ++I) {
     const auto *Expr = InsertCallExpr->getArg((unsigned int) I);
 
-    std::string ArgCastStrRef;
-    if (const auto *MatExpr = dyn_cast<MaterializeTemporaryExpr>(Expr)) {
-      ArgCastStrRef =
-          getNarrowingCastStr(MatExpr->GetTemporaryExpr()->IgnoreImpCasts()->getType().getCanonicalType(), *typeInfo);
+    std::string ArgCastStrRef1;
+    std::string ArgCastStrRef2;
+    std::string ArgAsString;
+    switch (ContainerType) {
+    case ContainerType::MAP:
+      if (const auto *PairConstructorExpr = dyn_cast<CXXConstructExpr>(Expr->IgnoreImplicit())) {
+        const auto *KeyExpr = PairConstructorExpr->getArg(0);
+        const auto *ValueExpr = PairConstructorExpr->getArg(1);
+
+        ArgCastStrRef1 = getNarrowingCastStr(KeyExpr->getType().getCanonicalType(), TemplateArguments[0].getAsType());
+        ArgCastStrRef2 =
+            getNarrowingCastStr(ValueExpr->getType().getCanonicalType(), TemplateArguments[1].getAsType());
+
+        const auto Arg1Str = getSourceTextForExpr(KeyExpr);
+        const auto Arg2Str = getSourceTextForExpr(ValueExpr);
+
+        ArgAsString = "{" + ArgCastStrRef1 + Arg1Str.str() + ", " + ArgCastStrRef2 + Arg2Str.str() + "}";
+      }
+      break;
+    case ContainerType::OTHER:
+      if (InsertionCall.CallType == InsertionType::EMPLACE) {
+        ArgAsString = getSourceTextForExpr(Expr).str();
+      } else {
+        ArgCastStrRef1 = getNarrowingCastStr(Expr->IgnoreImplicit()->getType().getCanonicalType(),
+                                             TemplateArguments[0].getAsType());
+        ArgAsString = ArgCastStrRef1 + getSourceTextForExpr(Expr).str();
+      }
+      break;
     }
-
-    auto ArgAsString = Lexer::getSourceText(
-        CharSourceRange::getTokenRange(Expr->getLocStart(), Expr->getLocEnd()),
-        *Result.SourceManager, Result.Context->getLangOpts());
-
-    ArgumentsAsString.push_back(ArgCastStrRef + ArgAsString.str());
+    ArgumentsAsString.push_back(ArgAsString);
   }
 
   InsertionCall.CallArguments = ArgumentsAsString;
@@ -111,14 +145,25 @@ template<unsigned N>
 static void formatArguments(const InsertionCall<N> ArgumentList,
                             llvm::raw_ostream &Stream) {
   StringRef Delimiter = "";
-  if (ArgumentList.CallType == InsertionType::EMPLACE)
-    Stream << '{';
+  const auto IsMapType = ArgumentList.ContainerType == ContainerType::MAP;
+  const auto IsEmplaceCall = ArgumentList.CallType == InsertionType::EMPLACE;
+  if (IsMapType && IsEmplaceCall) {
+    Stream << "{";
+  } else if (IsEmplaceCall) {
+    if (const auto *RecordT = dyn_cast<RecordType>(ArgumentList.CallQualType.getTypePtr())) {
+      Stream << RecordT->getDecl()->getName().str();
+    }
+    Stream << '(';
+  }
   for (const auto &Tokens : ArgumentList.CallArguments) {
     Stream << Delimiter << Tokens;
     Delimiter = ", ";
   }
-  if (ArgumentList.CallType == InsertionType::EMPLACE)
-    Stream << '}';
+  if (IsMapType && IsEmplaceCall) {
+    Stream << "}";
+  } else if (IsEmplaceCall) {
+    Stream << ')';
+  }
 }
 
 void ContainerDefaultInitializerCheck::registerMatchers(MatchFinder *Finder) {
@@ -188,8 +233,9 @@ void ContainerDefaultInitializerCheck::check(
   StringRef Delimiter = "";
 
   SmallVector<FixItHint, 5> FixitHints{};
-  const auto ContainerTemplateType =
-      ContainerTemplateSpec->getTemplateArgs()[0].getAsType();
+
+  const auto &ContainerTemplateType =
+      ContainerTemplateSpec->getTemplateArgs();
 
   while (CompoundStmtIterator != CompoundStatement->body_end()) {
     const CXXMemberCallExpr *ActualMemberCallExpr;
@@ -204,8 +250,11 @@ void ContainerDefaultInitializerCheck::check(
             ->getReferencedDeclOfCallee() == ContainerDeclaration) {
       Tokens << Delimiter;
       Delimiter = ", ";
-      formatArguments(getInsertionArguments<5>(Result, ActualMemberCallExpr,
-                                               &ContainerTemplateType),
+      formatArguments(getInsertionArguments<5>(Result,
+                                               ActualMemberCallExpr,
+                                               ContainerTemplateType,
+                                               StringRef(ContainerDeclaration->getType().getAsString()).contains("map")
+                                               ? ContainerType::MAP : ContainerType::OTHER),
                       Tokens);
       HasInsertionCall = true;
       FixitHints.push_back(FixItHint::CreateRemoval(

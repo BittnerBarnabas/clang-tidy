@@ -21,22 +21,40 @@ static const auto OperationsToMatchRegex =
 static const auto ContainersToMatchRegex =
     "std::.*vector|std::.*map|std::.*deque";
 
-static const std::set <StringRef> IntegralTypes =
+static const std::set<StringRef> IntegralTypes =
     {"bool", "char", "short", "unsigned short", "int", "unsigned int", "long", "unsigned long", "long long",
      "unsigned long long"};
 
-static const std::set <StringRef> FloatingTypes = {"float", "double", "long double"};
+static const std::set<StringRef> FloatingTypes = {"float", "double", "long double"};
 
 std::set<const Decl *> ProcessedDeclarations{};
 enum class InsertionType { EMPLACE, STANDARD };
 enum class ContainerType { MAP, OTHER };
 
-template<unsigned int N> struct InsertionCall {
-  SmallVector <std::string, N> CallArguments;
-  InsertionType CallType;
+template<unsigned int N> class InsertionCall {
+  SmallVector<std::string, N> CallArguments;
+  InsertionType InsertionCallType;
   QualType CallQualType;
   ContainerType ContainerType;
-  std::string TypeAsString;
+public:
+  InsertionCall(const SmallVector<std::string, N> &CallArguments,
+                InsertionType CallType,
+                const QualType &CallQualType,
+                const enum ContainerType &ContainerType)
+      : CallArguments(CallArguments), InsertionCallType(CallType), CallQualType(CallQualType),
+        ContainerType(ContainerType) {}
+  const SmallVector<std::string, N> &getCallArguments() const {
+    return CallArguments;
+  }
+  InsertionType getCallType() const {
+    return InsertionCallType;
+  }
+  const QualType &getCallQualType() const {
+    return CallQualType;
+  }
+  const enum ContainerType &getContainerType() const {
+    return ContainerType;
+  }
 };
 
 static SourceRange getRangeWithSemicolon(const MatchFinder::MatchResult &Result,
@@ -79,7 +97,7 @@ template<unsigned int N>
 static InsertionCall<N>
 getInsertionArguments(const MatchFinder::MatchResult &Result,
                       const CallExpr *InsertCallExpr,
-                      const TemplateArgumentList &TemplateArguments,
+                      const TemplateSpecializationType *TemplateArguments,
                       ContainerType ContainerType) {
 
   const auto getSourceTextForExpr = [&](const Expr *Expression) {
@@ -88,16 +106,11 @@ getInsertionArguments(const MatchFinder::MatchResult &Result,
         *Result.SourceManager, Result.Context->getLangOpts());
   };
 
-  SmallVector <std::string, N> ArgumentsAsString;
-  InsertionCall<N> InsertionCall;
-  InsertionCall.ContainerType = ContainerType;
+  SmallVector<std::string, N> ArgumentsAsString;
+  InsertionType InsertionCallType = InsertionType::STANDARD;
   if (const auto *InsertFuncDecl = InsertCallExpr->getDirectCallee()) {
-    const auto InsertFuncName = InsertFuncDecl->getName();
-    if (InsertFuncName.contains("emplace")) {
-      InsertionCall.CallType = InsertionType::EMPLACE;
-      InsertionCall.CallQualType = TemplateArguments[0].getAsType();
-    } else {
-      InsertionCall.CallType = InsertionType::STANDARD;
+    if (InsertFuncDecl->getName().contains("emplace")) {
+      InsertionCallType = InsertionType::EMPLACE;
     }
   }
 
@@ -110,26 +123,34 @@ getInsertionArguments(const MatchFinder::MatchResult &Result,
     std::string ArgAsString;
     switch (ContainerType) {
     case ContainerType::MAP:
-      if (const auto *PairConstructorExpr = dyn_cast<CXXConstructExpr>(Expr->IgnoreImplicit())) {
+      if (InsertionCallType == InsertionType::STANDARD) {
+        const auto *PairConstructorExpr = dyn_cast<CXXConstructExpr>(Expr->IgnoreImplicit());
         const auto *KeyExpr = PairConstructorExpr->getArg(0);
         const auto *ValueExpr = PairConstructorExpr->getArg(1);
 
-        ArgCastStrRef1 = getNarrowingCastStr(KeyExpr->getType().getCanonicalType(), TemplateArguments[0].getAsType());
+        ArgCastStrRef1 =
+            getNarrowingCastStr(KeyExpr->getType().getCanonicalType(), TemplateArguments->getArg(0).getAsType());
         ArgCastStrRef2 =
-            getNarrowingCastStr(ValueExpr->getType().getCanonicalType(), TemplateArguments[1].getAsType());
+            getNarrowingCastStr(ValueExpr->getType().getCanonicalType(), TemplateArguments->getArg(1).getAsType());
 
         const auto Arg1Str = getSourceTextForExpr(KeyExpr);
         const auto Arg2Str = getSourceTextForExpr(ValueExpr);
 
         ArgAsString = "{" + ArgCastStrRef1 + Arg1Str.str() + ", " + ArgCastStrRef2 + Arg2Str.str() + "}";
+      } else {
+        const auto
+            ArgCastStr =
+            getNarrowingCastStr(Expr->IgnoreImplicit()->getType(), TemplateArguments->getArg((int) I).getAsType());
+        ArgAsString = ArgCastStr + getSourceTextForExpr(Expr).str();
       }
       break;
     case ContainerType::OTHER:
-      if (InsertionCall.CallType == InsertionType::EMPLACE) {
+      if (InsertionCallType == InsertionType::EMPLACE
+          && !isa<BuiltinType>(TemplateArguments->getArg(0).getAsType().getTypePtr())) {
         ArgAsString = getSourceTextForExpr(Expr).str();
       } else {
         ArgCastStrRef1 = getNarrowingCastStr(Expr->IgnoreImplicit()->getType().getCanonicalType(),
-                                             TemplateArguments[0].getAsType());
+                                             TemplateArguments->getArg(0).getAsType());
         ArgAsString = ArgCastStrRef1 + getSourceTextForExpr(Expr).str();
       }
       break;
@@ -137,31 +158,31 @@ getInsertionArguments(const MatchFinder::MatchResult &Result,
     ArgumentsAsString.push_back(ArgAsString);
   }
 
-  InsertionCall.CallArguments = ArgumentsAsString;
-  return InsertionCall;
+  return InsertionCall<N>(ArgumentsAsString,
+                          InsertionCallType,
+                          TemplateArguments->getArg(0).getAsType(),
+                          ContainerType);
 }
 
 template<unsigned N>
 static void formatArguments(const InsertionCall<N> ArgumentList,
                             llvm::raw_ostream &Stream) {
   StringRef Delimiter = "";
-  const auto IsMapType = ArgumentList.ContainerType == ContainerType::MAP;
-  const auto IsEmplaceCall = ArgumentList.CallType == InsertionType::EMPLACE;
+  const auto IsMapType = ArgumentList.getContainerType() == ContainerType::MAP;
+  const auto IsEmplaceCall = ArgumentList.getCallType() == InsertionType::EMPLACE;
+  const auto IsArgumentBuiltInType = isa<BuiltinType>(ArgumentList.getCallQualType().getTypePtr());
   if (IsMapType && IsEmplaceCall) {
     Stream << "{";
-  } else if (IsEmplaceCall) {
-    if (const auto *RecordT = dyn_cast<RecordType>(ArgumentList.CallQualType.getTypePtr())) {
-      Stream << RecordT->getDecl()->getName().str();
-    }
-    Stream << '(';
+  } else if (IsEmplaceCall && !IsArgumentBuiltInType) {
+    Stream << ArgumentList.getCallQualType().getAsString() << '(';
   }
-  for (const auto &Tokens : ArgumentList.CallArguments) {
+  for (const auto &Tokens : ArgumentList.getCallArguments()) {
     Stream << Delimiter << Tokens;
     Delimiter = ", ";
   }
   if (IsMapType && IsEmplaceCall) {
     Stream << "}";
-  } else if (IsEmplaceCall) {
+  } else if (IsEmplaceCall && !IsArgumentBuiltInType) {
     Stream << ')';
   }
 }
@@ -219,6 +240,10 @@ void ContainerDefaultInitializerCheck::check(
       Result.Nodes.getNodeAs<CXXMemberCallExpr>("dirtyMemberCallExpr");
   const auto *CompoundStmtIterator = CompoundStatement->body_begin();
 
+  const auto *Tmp = dyn_cast<TemplateSpecializationType>(ContainerDeclaration->getType().getTypePtr());
+  //Tmp->getArg(0).dump();
+  //ContainerTemplateSpec->getTemplateArgs()[0].dump();
+  //auto tmp2 = ContainerDeclaration->getType().getAsString();
   // This finds the matched container declaration.
   while (!dyn_cast<DeclStmt>(*CompoundStmtIterator)
       || dyn_cast<DeclStmt>(*CompoundStmtIterator)->getSingleDecl() != ContainerDeclaration) {
@@ -252,7 +277,7 @@ void ContainerDefaultInitializerCheck::check(
       Delimiter = ", ";
       formatArguments(getInsertionArguments<5>(Result,
                                                ActualMemberCallExpr,
-                                               ContainerTemplateType,
+                                               Tmp,
                                                StringRef(ContainerDeclaration->getType().getAsString()).contains("map")
                                                ? ContainerType::MAP : ContainerType::OTHER),
                       Tokens);

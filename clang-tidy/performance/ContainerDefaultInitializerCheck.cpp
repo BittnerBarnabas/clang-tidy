@@ -19,7 +19,7 @@ static const auto OperationsToMatchRegex =
     "push_back|emplace|emplace_back|insert";
 
 static const auto ContainersToMatchRegex =
-    "std::.*vector|std::.*map|std::.*deque";
+    "std::.*vector|std::.*map|std::.*deque|std::.*set";
 
 std::set<const Decl *> ProcessedDeclarations{};
 
@@ -169,7 +169,13 @@ static void formatArguments(const InsertionCall<N> ArgumentList,
   if (IsMapType && IsEmplaceCall) {
     Stream << "{";
   } else if (IsEmplaceCall && !IsArgumentBuiltInType) {
-    Stream << ArgumentList.getCallQualType().getAsString() << '(';
+    const auto& ArgumentType = ArgumentList.getCallQualType();
+    if(const auto* RecordTypeCall = dyn_cast<RecordType>(ArgumentType.getTypePtr())) {
+      Stream << RecordTypeCall->getDecl()->getName();
+    } else {
+      Stream << ArgumentType.getAsString();
+    }
+    Stream << '(';
   }
   for (const auto &Tokens : ArgumentList.getCallArguments()) {
     Stream << Delimiter << Tokens;

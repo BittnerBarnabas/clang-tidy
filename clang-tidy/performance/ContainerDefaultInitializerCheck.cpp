@@ -26,7 +26,7 @@ std::set<const Decl *> ProcessedDeclarations{};
 enum class InsertionType { EMPLACE, STANDARD };
 enum class ContainerType { MAP, OTHER };
 
-template<unsigned int N> class InsertionCall {
+template <unsigned int N> class InsertionCall {
   SmallVector<std::string, N> CallArguments;
   InsertionType InsertionCallType;
   QualType CallQualType;
@@ -81,7 +81,7 @@ static std::string getNarrowingCastStr(const QualType &CastSource,
   return "";
 }
 
-template<unsigned int N>
+template <unsigned int N>
 static InsertionCall<N>
 getInsertionArguments(const MatchFinder::MatchResult &Result,
                       const CallExpr *InsertCallExpr,
@@ -105,7 +105,7 @@ getInsertionArguments(const MatchFinder::MatchResult &Result,
 
   for (size_t I = 0, ArgCount = InsertCallExpr->getNumArgs(); I < ArgCount;
        ++I) {
-    const auto *Expr = InsertCallExpr->getArg((unsigned int) I);
+    const auto *Expr = InsertCallExpr->getArg((unsigned int)I);
 
     std::string ArgAsString;
     switch (ContainerType) {
@@ -127,11 +127,11 @@ getInsertionArguments(const MatchFinder::MatchResult &Result,
         const auto Arg2Str = getSourceTextForExpr(ValueExpr);
 
         ArgAsString = "{" + FirstArgCast + Arg1Str.str() + ", " +
-            SecondArgCast + Arg2Str.str() + "}";
+                      SecondArgCast + Arg2Str.str() + "}";
       } else {
         const auto ArgCastStr =
             getNarrowingCastStr(Expr->IgnoreImplicit()->getType(),
-                                TemplateArguments->getArg((int) I).getAsType());
+                                TemplateArguments->getArg((int)I).getAsType());
         ArgAsString = ArgCastStr + getSourceTextForExpr(Expr).str();
       }
       break;
@@ -157,7 +157,7 @@ getInsertionArguments(const MatchFinder::MatchResult &Result,
                           ContainerType);
 }
 
-template<unsigned N>
+template <unsigned N>
 static void formatArguments(const InsertionCall<N> ArgumentList,
                             llvm::raw_ostream &Stream) {
   StringRef Delimiter = "";
@@ -169,8 +169,9 @@ static void formatArguments(const InsertionCall<N> ArgumentList,
   if (IsMapType && IsEmplaceCall) {
     Stream << "{";
   } else if (IsEmplaceCall && !IsArgumentBuiltInType) {
-    const auto& ArgumentType = ArgumentList.getCallQualType();
-    if(const auto* RecordTypeCall = dyn_cast<RecordType>(ArgumentType.getTypePtr())) {
+    const auto &ArgumentType = ArgumentList.getCallQualType();
+    if (const auto *RecordTypeCall =
+            dyn_cast<RecordType>(ArgumentType.getTypePtr())) {
       Stream << RecordTypeCall->getDecl()->getName();
     } else {
       Stream << ArgumentType.getAsString();
@@ -242,15 +243,17 @@ void ContainerDefaultInitializerCheck::check(
   const TemplateSpecializationType *ContainerTemplateParameters;
   const auto *ContainerType = ContainerDeclaration->getType().getTypePtr();
   if (isa<TemplateSpecializationType>(ContainerType)) {
-    ContainerTemplateParameters = dyn_cast<TemplateSpecializationType>(ContainerType);
-  } else {
     ContainerTemplateParameters =
-        dyn_cast<TemplateSpecializationType>(ContainerType->getLocallyUnqualifiedSingleStepDesugaredType().getTypePtr());
+        dyn_cast<TemplateSpecializationType>(ContainerType);
+  } else {
+    ContainerTemplateParameters = dyn_cast<TemplateSpecializationType>(
+        ContainerType->getLocallyUnqualifiedSingleStepDesugaredType()
+            .getTypePtr());
   }
 
   while (!dyn_cast<DeclStmt>(*CompoundStmtIterator) ||
-      dyn_cast<DeclStmt>(*CompoundStmtIterator)->getSingleDecl() !=
-          ContainerDeclaration) {
+         dyn_cast<DeclStmt>(*CompoundStmtIterator)->getSingleDecl() !=
+             ContainerDeclaration) {
     CompoundStmtIterator++;
   }
 
@@ -265,10 +268,10 @@ void ContainerDefaultInitializerCheck::check(
   while (CompoundStmtIterator != CompoundStatement->body_end()) {
     const CXXMemberCallExpr *ActualMemberCallExpr;
     if (!(ActualMemberCallExpr = dyn_cast<CXXMemberCallExpr>(
-        (*CompoundStmtIterator)->IgnoreImplicit())) ||
+              (*CompoundStmtIterator)->IgnoreImplicit())) ||
         ActualMemberCallExpr == DirtyMemberCall ||
         ActualMemberCallExpr->getImplicitObjectArgument()
-            ->getReferencedDeclOfCallee() != ContainerDeclaration) {
+                ->getReferencedDeclOfCallee() != ContainerDeclaration) {
       break;
     }
 
@@ -277,8 +280,8 @@ void ContainerDefaultInitializerCheck::check(
 
     const auto BaseContainerType =
         StringRef(ContainerDeclaration->getType().getAsString()).contains("map")
-        ? ContainerType::MAP
-        : ContainerType::OTHER;
+            ? ContainerType::MAP
+            : ContainerType::OTHER;
 
     formatArguments(getInsertionArguments<5>(Result, ActualMemberCallExpr,
                                              ContainerTemplateParameters,

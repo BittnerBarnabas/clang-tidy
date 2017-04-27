@@ -106,7 +106,6 @@ getInsertionArguments(const MatchFinder::MatchResult &Result,
   for (size_t I = 0, ArgCount = InsertCallExpr->getNumArgs(); I < ArgCount;
        ++I) {
     const auto *Expr = InsertCallExpr->getArg((unsigned int)I);
-
     std::string ArgAsString;
     switch (ContainerType) {
     case ContainerType::MAP:

@@ -211,15 +211,12 @@ void ContainerDefaultInitializerCheck::registerMatchers(MatchFinder *Finder) {
           on(DeclRefExprToContainer))
           .bind("dirtyMemberCallExpr");
 
+  Finder->addMatcher(compoundStmt(forEach(expr(ignoringImplicit(
+                                      MemberCallExprWithRefToContainer))))
+                         .bind("compoundStmt"),
+                     this);
   Finder->addMatcher(
-      compoundStmt(eachOf(forEach(MemberCallExprWithRefToContainer),
-                          forEach(exprWithCleanups(
-                              has(MemberCallExprWithRefToContainer)))))
-          .bind("compoundStmt"),
-      this);
-  Finder->addMatcher(
-      compoundStmt(eachOf(forEach(MemberCallExpr),
-                          forEach(exprWithCleanups(has(MemberCallExpr)))))
+      compoundStmt(forEach(expr(ignoringImplicit(MemberCallExpr))))
           .bind("compoundStmt"),
       this);
 }
@@ -253,9 +250,16 @@ void ContainerDefaultInitializerCheck::check(
             .getTypePtr());
   }
 
-  while (!dyn_cast<DeclStmt>(*CompoundStmtIterator) ||
-         dyn_cast<DeclStmt>(*CompoundStmtIterator)->getSingleDecl() !=
-             ContainerDeclaration) {
+  const auto pointsToOriginalContainerDecl = [&](const Stmt *const Iter) {
+    if (const auto *DeclStatement = dyn_cast<DeclStmt>(Iter)) {
+      if (DeclStatement->isSingleDecl()) {
+        return DeclStatement->getSingleDecl() == ContainerDeclaration;
+      }
+    }
+    return false;
+  };
+
+  while (!pointsToOriginalContainerDecl(*CompoundStmtIterator)) {
     CompoundStmtIterator++;
   }
 

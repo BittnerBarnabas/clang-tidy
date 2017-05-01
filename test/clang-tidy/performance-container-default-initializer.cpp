@@ -58,6 +58,7 @@ template<class T>
 class set {
 public:
   set(){}
+  set(initializer_list<T>){}
   template<class ...T2>
   void emplace(T2&& ...){}
   template<class T2>
@@ -86,15 +87,17 @@ double f2(int) { return 0.0; }
 template<class T>
 int f3(const std::vector<T>&) { return 0; }
 
+#define semi ;
+
 int main() {
-  short shortInt;
-  unsigned short uShortInt;
-  int Int;
-  unsigned int uInt;
-  long longInt;
-  unsigned long uLongInt;
-  long long longLongInt;
-  unsigned long long uLongLongInt;
+  short shortInt = 1;
+  unsigned short uShortInt = 1;
+  int Int = 1;
+  unsigned int uInt = 1;
+  long longInt = 1;
+  unsigned long uLongInt = 1;
+  long long longLongInt = 1;
+  unsigned long long uLongLongInt = 1;
   // Tests for std::vector
   {
     std::vector<short> vec1;
@@ -158,7 +161,7 @@ int main() {
     std::string str;
     std::map<std::string, int> map1;
     // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: Initialize containers in place
-    // CHECK-FIXES: {{.*}}std::map<std::string, int> map1{{[{][{]}}"A", (int)1.0}, {std::make_pair("B", 2.0)}, {str, (int)2.0{{[}][}]}};{{$}}
+    // CHECK-FIXES: {{.*}}std::map<std::string, int> map1{{[{][{]}}"A", (int)1.0}, {std::make_pair("B", 2.0)}, {str, 2.0{{[}][}]}};{{$}}
     map1.emplace("A", 1.0);
     map1.emplace(std::make_pair("B", 2.0));
     map1.insert({str, 2.0});
@@ -203,18 +206,45 @@ int main() {
     std::vector<int> vec1    {};
     // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: Initialize containers in place
     // CHECK-FIXES: {{.*}}std::vector<int> vec1    {1};{{$}}
-    vec1.push_back(1);
+    vec1.push_back(1) semi
     std::vector<int> vec2
 
     ;
     // CHECK-MESSAGES: :[[@LINE-3]]:5: warning: Initialize containers in place
     // CHECK-FIXES: {{.*}}std::vector<int> vec2{2}{{$}}
-    vec2.push_back(2);
+    vec2.push_back(2) semi
     std::vector<int> vec3{3};
     vec3.push_back(3);
     std::vector<int> vec4 = { 4 };
     vec4.push_back(4);
     std::vector<int> vec5(4,4);
     vec5.push_back(5);
+  }
+  {
+    int a = 4;
+    int b = 3;
+    std::vector<int> vec1;
+    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: Initialize containers in place
+    // CHECK-FIXES: {{.*}}std::vector<int> vec1{(a < b ? b : a), (int)(a < b ? f1(a) : f2(b)), (int)(f1(a), f2(a))};{{$}}
+    vec1.push_back(a < b ? b : a);
+    vec1.emplace_back(a < b ? f1(a) : f2(b));
+    vec1.push_back((f1(a), f2(a)));
+    a < b ? vec1.push_back(4) : vec1.emplace_back(4);
+
+    std::map<int, int> map1;
+    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: Initialize containers in place
+    // CHECK-FIXES: {{.*}}std::map<int, int> map1{{[{][{]}}(int)(a < b ? f1(a) : f2(b)), (int)(a < b ? f1(a) : f2(b))}, {3, 1}, {a < b ? f1(a) : f2(b), 3}, {3.2, 1.2{{[}][}]}};{{$}}
+    map1.emplace(a < b ? f1(a) : f2(b), a < b ? f1(a) : f2(b));
+    map1.emplace(3,1);
+    map1.insert({a < b ? f1(a) : f2(b), 3});
+    map1.insert({3.2, 1.2});
+
+    std::map<int, int> map2;
+    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: Initialize containers in place
+    // CHECK-FIXES: {{.*}}std::map<int, int> map2{{[{][{]}}(int)(a < b ? f1(a) : f2(b)), (int)(a < b ? f1(a) : f2(b))}, {3, 1}, {a < b ? f1(a) : f2(b), 3}, {3.2, 1.2{{[}][}]}};{{$}}
+    map2.emplace(a < b ? f1(a) : f2(b), a < b ? f1(a) : f2(b));
+    map2.emplace(3,1);
+    map2.insert({a < b ? f1(a) : f2(b), 3});
+    map2.insert({3.2, 1.2});
   }
 }

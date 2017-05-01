@@ -46,29 +46,17 @@ public:
   const enum ContainerType &getContainerType() const { return ContainerType; }
 };
 
-static SourceRange getRangeWithSemicolon(const MatchFinder::MatchResult &Result,
-                                         const Expr *Expression) {
+static SourceRange
+getRangeWithFollowingToken(const MatchFinder::MatchResult &Result,
+                           const Expr *Expression) {
   SourceRange Range{Expression->getSourceRange()};
-  int Offset = 1;
-  while (true) {
-    SourceLocation OffsetLocationEnd{
-        Expression->getLocEnd().getLocWithOffset(Offset)};
-    SourceRange RangeForString{OffsetLocationEnd};
-
-    CharSourceRange CSR = Lexer::makeFileCharRange(
-        CharSourceRange::getTokenRange(RangeForString), *Result.SourceManager,
-        Result.Context->getLangOpts());
-
-    const auto SourceSnippet = Lexer::getSourceText(
-        CSR, *Result.SourceManager, Result.Context->getLangOpts());
-
-    if (SourceSnippet == ";") {
-      Range.setEnd(OffsetLocationEnd);
-      return Range;
-    } else {
-      Offset++;
-    }
-  }
+  Token Tok;
+  Lexer::getRawToken(Expression->getLocEnd().getLocWithOffset(1), Tok,
+                     *Result.SourceManager,
+                     Result.Context->getLangOpts(), /*ignore WS*/
+                     true);
+  Range.setEnd(Tok.getEndLoc());
+  return Range;
 }
 
 static std::string getNarrowingCastStr(const QualType &CastSource,
@@ -81,6 +69,18 @@ static std::string getNarrowingCastStr(const QualType &CastSource,
   return "";
 }
 
+static bool isTernaryOperator(const Expr *Expression) {
+  return isa<ConditionalOperator>(Expression->IgnoreImplicit());
+}
+
+static void getExprAsStr(const Expr *Expr, std::string &ArgAsString,
+                         const std::string &SrcTextForExpr) {
+  if (isTernaryOperator(Expr)) {
+    ArgAsString.append("(").append(SrcTextForExpr).append(")");
+  } else {
+    ArgAsString.append(SrcTextForExpr);
+  }
+}
 template <unsigned int N>
 static InsertionCall<N>
 getInsertionArguments(const MatchFinder::MatchResult &Result,
@@ -109,29 +109,14 @@ getInsertionArguments(const MatchFinder::MatchResult &Result,
     std::string ArgAsString;
     switch (ContainerType) {
     case ContainerType::MAP:
-      if (InsertionCallType == InsertionType::STANDARD) {
-        const auto *PairConstructorExpr =
-            dyn_cast<CXXConstructExpr>(Expr->IgnoreImplicit());
-        const auto *KeyExpr = PairConstructorExpr->getArg(0);
-        const auto *ValueExpr = PairConstructorExpr->getArg(1);
-
-        const auto FirstArgCast =
-            getNarrowingCastStr(KeyExpr->getType().getCanonicalType(),
-                                TemplateArguments->getArg(0).getAsType());
-        const auto SecondArgCast =
-            getNarrowingCastStr(ValueExpr->getType().getCanonicalType(),
-                                TemplateArguments->getArg(1).getAsType());
-
-        const auto Arg1Str = getSourceTextForExpr(KeyExpr);
-        const auto Arg2Str = getSourceTextForExpr(ValueExpr);
-
-        ArgAsString = "{" + FirstArgCast + Arg1Str.str() + ", " +
-                      SecondArgCast + Arg2Str.str() + "}";
-      } else {
+      if (InsertionCallType == InsertionType::EMPLACE) {
         const auto ArgCastStr =
             getNarrowingCastStr(Expr->IgnoreImplicit()->getType(),
                                 TemplateArguments->getArg((int)I).getAsType());
-        ArgAsString = ArgCastStr + getSourceTextForExpr(Expr).str();
+        ArgAsString = ArgCastStr;
+        getExprAsStr(Expr, ArgAsString, getSourceTextForExpr(Expr));
+      } else {
+        ArgAsString = getSourceTextForExpr(Expr);
       }
       break;
     case ContainerType::OTHER:
@@ -143,8 +128,9 @@ getInsertionArguments(const MatchFinder::MatchResult &Result,
         const auto ArgCast = getNarrowingCastStr(
             Expr->IgnoreImplicit()->getType().getCanonicalType(),
             TemplateArguments->getArg(0).getAsType());
-
-        ArgAsString = ArgCast + getSourceTextForExpr(Expr).str();
+        ArgAsString = ArgCast;
+        const auto SrcTextForExpr = getSourceTextForExpr(Expr).str();
+        getExprAsStr(Expr, ArgAsString, SrcTextForExpr);
       }
       break;
     }
@@ -305,7 +291,8 @@ void ContainerDefaultInitializerCheck::check(
                     Tokens);
     HasInsertionCall = true;
     FixitHints.push_back(FixItHint::CreateRemoval(
-        getRangeWithSemicolon(Result, ActualMemberCallExpr)));
+        /* get the range with tailing semicolon */
+        getRangeWithFollowingToken(Result, ActualMemberCallExpr)));
     CompoundStmtIterator++;
   }
 

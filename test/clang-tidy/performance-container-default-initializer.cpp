@@ -45,10 +45,13 @@ template<class T>
 class vector {
 public:
   vector(){}
+  vector(initializer_list<T> ){}
+  vector(int, int){}
   template<class ...T2>
   void emplace_back(T2&& ...){}
   template<class T2>
   void push_back(T2&&){}
+  int size(){return 0;}
 };
 
 template<class T>
@@ -78,6 +81,11 @@ namespace q{
 typedef MyObj type;
 }
 
+int f1(int) { return 0;}
+double f2(int) { return 0.0; }
+template<class T>
+int f3(const std::vector<T>&) { return 0; }
+
 int main() {
   short shortInt;
   unsigned short uShortInt;
@@ -104,7 +112,7 @@ int main() {
   }
   {
     std::vector<int> vec1;
-    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: Initialize containers in place if you can [performance-container-default-initializer]
+    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: Initialize containers in place
     // CHECK-FIXES: {{.*}}std::vector<int> vec1{(int)shortInt, (int)uShortInt, Int, (int)uInt, (int)longInt, (int)uLongInt, (int)longLongInt, (int)uLongLongInt};{{$}}
     vec1.push_back(shortInt);
     vec1.emplace_back(uShortInt);
@@ -117,7 +125,7 @@ int main() {
   }
   {
     std::vector<double> vec1;
-    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: Initialize containers in place if you can [performance-container-default-initializer]
+    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: Initialize containers in place
     // CHECK-FIXES: {{.*}}std::vector<double> vec1{(double)shortInt, (double)uShortInt, (double)Int, (double)uInt, (double)longInt, (double)uLongInt, (double)longLongInt, (double)uLongLongInt};{{$}}
     vec1.push_back(shortInt);
     vec1.emplace_back(uShortInt);
@@ -130,7 +138,7 @@ int main() {
   }
   {
     std::vector<MyObj> vec1;
-    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: Initialize containers in place if you can [performance-container-default-initializer]
+    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: Initialize containers in place
     // CHECK-FIXES: {{.*}}std::vector<MyObj> vec1{MyObj(1,1), MyObj(1, 1), MyObj(1.0, 1.0), MyObj(1.0, 1), MyObj(MyObj(1.0,1))};{{$}}
     vec1.push_back(MyObj(1,1));
     vec1.emplace_back(1,1);
@@ -141,7 +149,7 @@ int main() {
   {
     using namespace std;
     set<int> set1;
-    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: Initialize containers in place if you can [performance-container-default-initializer]
+    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: Initialize containers in place
     // CHECK-FIXES: {{.*}}set<int> set1{(int)1.0, (int)2.0};{{$}}
     set1.insert(1.0);
     set1.emplace(2.0);
@@ -149,8 +157,8 @@ int main() {
   {
     std::string str;
     std::map<std::string, int> map1;
-    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: Initialize containers in place if you can [performance-container-default-initializer]
-    // CHECK-FIXES: {{.*}}std::map<std::string, int> map1{{"A", (int)1.0}, {std::make_pair("B", 2.0)}, {str, (int)2.0}};{{$}}
+    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: Initialize containers in place
+    // CHECK-FIXES: {{.*}}std::map<std::string, int> map1{{[{][{]}}"A", (int)1.0}, {std::make_pair("B", 2.0)}, {str, (int)2.0{{[}][}]}};{{$}}
     map1.emplace("A", 1.0);
     map1.emplace(std::make_pair("B", 2.0));
     map1.insert({str, 2.0});
@@ -159,11 +167,54 @@ int main() {
     std::string str1;
     std::string str2;
     std::set<std::string> set1;
-    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: Initialize containers in place if you can [performance-container-default-initializer]
+    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: Initialize containers in place
     // CHECK-FIXES: {{.*}}std::set<std::string> set1{str1, std::string(str2)};{{$}}
     set1.insert(str1);
     set1.emplace(str2);
     str2 = "abc";
     set1.insert(str2);
+  }
+  {
+    std::vector<int> vec1;
+    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: Initialize containers in place
+    // CHECK-FIXES: {{.*}}std::vector<int> vec1{4};{{$}}
+    vec1.push_back(4);
+    vec1.push_back(vec1.size());
+    vec1.emplace_back(5);
+    int a = 5;
+    std::vector<int> vec2;
+    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: Initialize containers in place
+    // CHECK-FIXES: {{.*}}std::vector<int> vec2{4, (int)f2(a), f1(a)};{{$}}
+    vec2.emplace_back(4);
+    vec2.emplace_back(f2(a));
+    vec2.push_back(f1(a));
+    a++;
+    vec2.push_back(f1(a));
+  }
+  {
+    std::vector<int> vec1;
+    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: Initialize containers in place
+    // CHECK-FIXES: {{.*}}std::vector<int> vec1{1};{{$}}
+    vec1.push_back(1);
+    vec1.push_back(f3(vec1));
+    vec1.emplace_back(3);
+  }
+  {
+    std::vector<int> vec1    {};
+    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: Initialize containers in place
+    // CHECK-FIXES: {{.*}}std::vector<int> vec1    {1};{{$}}
+    vec1.push_back(1);
+    std::vector<int> vec2
+
+    ;
+    // CHECK-MESSAGES: :[[@LINE-3]]:5: warning: Initialize containers in place
+    // CHECK-FIXES: {{.*}}std::vector<int> vec2{2}{{$}}
+    vec2.push_back(2);
+    std::vector<int> vec3{3};
+    vec3.push_back(3);
+    std::vector<int> vec4 = { 4 };
+    vec4.push_back(4);
+    std::vector<int> vec5(4,4);
+    vec5.push_back(5);
   }
 }

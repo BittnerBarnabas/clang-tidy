@@ -156,6 +156,19 @@ getInsertionArguments(const MatchFinder::MatchResult &Result,
                           ContainerType);
 }
 
+static FixItHint
+getRefactoredContainerDecl(const VarDecl *ContainerDecl,
+                           llvm::raw_string_ostream &TokenStream) {
+  if (ContainerDecl->getInitStyle() == VarDecl::InitializationStyle::CallInit) {
+    return FixItHint::CreateInsertion(
+        ContainerDecl->getLocEnd().getLocWithOffset(
+            (int)ContainerDecl->getName().size()),
+        (Twine{'{'} + TokenStream.str() + Twine{'}'}).str());
+  }
+  return FixItHint::CreateInsertion(ContainerDecl->getLocEnd(),
+                                    TokenStream.str());
+}
+
 template <unsigned N>
 static void formatArguments(const InsertionCall<N> ArgumentList,
                             llvm::raw_ostream &Stream) {
@@ -205,7 +218,7 @@ void ContainerDefaultInitializerCheck::registerMatchers(MatchFinder *Finder) {
       cxxMemberCallExpr(HasOperationsNamedDecl, on(DeclRefExprToContainer))
           .bind("memberCallExpr");
 
-  const auto MemberCallExpr2 =
+  const auto MemberCallExprWithRefToContainer =
       cxxMemberCallExpr(
           HasOperationsNamedDecl,
           hasAnyArgument(expr(hasDescendant(DeclRefExprToContainer))),
@@ -213,8 +226,9 @@ void ContainerDefaultInitializerCheck::registerMatchers(MatchFinder *Finder) {
           .bind("dirtyMemberCallExpr");
 
   Finder->addMatcher(
-      compoundStmt(eachOf(forEach(MemberCallExpr2),
-                          forEach(exprWithCleanups(has(MemberCallExpr2)))))
+      compoundStmt(eachOf(forEach(MemberCallExprWithRefToContainer),
+                          forEach(exprWithCleanups(
+                              has(MemberCallExprWithRefToContainer)))))
           .bind("compoundStmt"),
       this);
   Finder->addMatcher(
@@ -226,7 +240,10 @@ void ContainerDefaultInitializerCheck::registerMatchers(MatchFinder *Finder) {
 
 void ContainerDefaultInitializerCheck::check(
     const MatchFinder::MatchResult &Result) {
-
+  // C++11 for initialization-list init
+  if (!Result.Context->getLangOpts().CPlusPlus11)
+    return;
+  std::vector<int> vec1(1, 2);
   const auto *ContainerDeclaration =
       Result.Nodes.getNodeAs<VarDecl>("containerDecl");
   if (ProcessedDeclarations.find(ContainerDeclaration) !=
@@ -293,9 +310,10 @@ void ContainerDefaultInitializerCheck::check(
   }
 
   if (HasInsertionCall) {
-    auto DiagnosticBuilder = diag(ContainerDeclaration->getLocStart(), "Initialize containers in place if you can")
-        << FixItHint::CreateInsertion(ContainerDeclaration->getLocEnd().getLocWithOffset(
-            (int) ContainerDeclaration->getName().size()), (Twine{'{'} + Tokens.str() + Twine{'}'}).str());
+    auto DiagnosticBuilder =
+        diag(ContainerDeclaration->getLocStart(),
+             "Initialize containers in place if you can")
+        << getRefactoredContainerDecl(ContainerDeclaration, Tokens);
     for (const auto &Fixit : FixitHints) {
       DiagnosticBuilder << Fixit;
     }

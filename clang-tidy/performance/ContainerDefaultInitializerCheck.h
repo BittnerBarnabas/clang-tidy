@@ -16,7 +16,9 @@ namespace clang {
 namespace tidy {
 namespace performance {
 
-/// FIXME: Write a short description.
+/// This check will warn when one default-initialises a standard container and
+/// immediately after it adds elements to that. In these cases the container
+/// should be initialised in the row declared.
 ///
 /// For the user-facing documentation see:
 /// http://clang.llvm.org/extra/clang-tidy/checks/performance-container-default-initializer.html

@@ -126,6 +126,7 @@ Clang-Tidy Checks
    performance-faster-string-find
    performance-for-range-copy
    performance-implicit-cast-in-loop
+   performance-inefficient-stream-use
    performance-inefficient-string-concatenation
    performance-type-promotion-in-math-fn
    performance-unnecessary-copy-initialization

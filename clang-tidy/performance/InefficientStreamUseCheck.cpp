@@ -15,18 +15,26 @@ namespace clang {
 namespace tidy {
 namespace performance {
 
-static inline StringRef
-getEscapedString(StringRef StrRef) {
+static inline StringRef getEscapedString(StringRef StrRef) {
   switch (StrRef.str()[0]) {
-  case '\n': return "\\n";
-  case '\t': return "\\t";
-  case '\a': return "\\a";
-  case '\b': return "\\b";
-  case '\f': return "\\f";
-  case '\r': return "\\r";
-  case '\v': return "\\v";
-  case '\'': return "\\'";
-  default: return StrRef;
+  case '\n':
+    return "\\n";
+  case '\t':
+    return "\\t";
+  case '\a':
+    return "\\a";
+  case '\b':
+    return "\\b";
+  case '\f':
+    return "\\f";
+  case '\r':
+    return "\\r";
+  case '\v':
+    return "\\v";
+  case '\'':
+    return "\\'";
+  default:
+    return StrRef;
   }
 }
 void InefficientStreamUseCheck::registerMatchers(MatchFinder *Finder) {
@@ -63,8 +71,8 @@ void InefficientStreamUseCheck::check(const MatchFinder::MatchResult &Result) {
             .str();
     diag(ToCharCastedString->getExprLoc(),
          "Inefficient cast from const "
-             "char[2] to const char *, consider "
-             "using a character literal")
+         "char[2] to const char *, consider "
+         "using a character literal")
         << FixItHint::CreateReplacement(ToCharCastedString->getExprLoc(),
                                         ReplacementSuggestion);
   } else {

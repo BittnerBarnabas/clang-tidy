@@ -5,6 +5,7 @@ add_clang_library(clangTidyPerformanceModule
   FasterStringFindCheck.cpp
   ForRangeCopyCheck.cpp
   ImplicitCastInLoopCheck.cpp
+  InefficientSharedPointerReferenceCheck.cpp
   InefficientStreamUseCheck.cpp
   InefficientStringConcatenationCheck.cpp
   PerformanceTidyModule.cpp

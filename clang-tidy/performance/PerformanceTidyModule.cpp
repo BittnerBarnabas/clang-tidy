@@ -10,10 +10,12 @@
 #include "../ClangTidy.h"
 #include "../ClangTidyModule.h"
 #include "../ClangTidyModuleRegistry.h"
+#include "ContainerDefaultInitializerCheck.h"
 #include "FasterStringFindCheck.h"
 #include "ForRangeCopyCheck.h"
 #include "ImplicitCastInLoopCheck.h"
 #include "InefficientSharedPointerReferenceCheck.h"
+#include "InefficientStreamUseCheck.h"
 #include "InefficientStringConcatenationCheck.h"
 #include "TypePromotionInMathFnCheck.h"
 #include "UnnecessaryCopyInitialization.h"
@@ -26,6 +28,8 @@ namespace performance {
 class PerformanceModule : public ClangTidyModule {
 public:
   void addCheckFactories(ClangTidyCheckFactories &CheckFactories) override {
+    CheckFactories.registerCheck<ContainerDefaultInitializerCheck>(
+        "performance-container-default-initializer");
     CheckFactories.registerCheck<FasterStringFindCheck>(
         "performance-faster-string-find");
     CheckFactories.registerCheck<ForRangeCopyCheck>(
@@ -34,6 +38,8 @@ public:
         "performance-implicit-cast-in-loop");
     CheckFactories.registerCheck<InefficientSharedPointerReferenceCheck>(
         "performance-inefficient-shared-pointer-reference");
+    CheckFactories.registerCheck<InefficientStreamUseCheck>(
+        "performance-inefficient-stream-use");
     CheckFactories.registerCheck<InefficientStringConcatenationCheck>(
         "performance-inefficient-string-concatenation");
     CheckFactories.registerCheck<TypePromotionInMathFnCheck>(

@@ -122,10 +122,12 @@ Clang-Tidy Checks
    modernize-use-using
    mpi-buffer-deref
    mpi-type-mismatch
+   performance-container-default-initializer
    performance-faster-string-find
    performance-for-range-copy
    performance-implicit-cast-in-loop
    performance-inefficient-shared-pointer-reference
+   performance-inefficient-stream-use
    performance-inefficient-string-concatenation
    performance-type-promotion-in-math-fn
    performance-unnecessary-copy-initialization

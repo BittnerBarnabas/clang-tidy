@@ -27,7 +27,7 @@ static std::string getBaseTypeAsString(const Type *Type) {
   if (!AsTemplateSpecT)
     return "";
 
-  for (size_t I = 0, ArgCount = AsTemplateSpecT->getNumArgs(); I < ArgCount;
+  for (unsigned I = 0, ArgCount = AsTemplateSpecT->getNumArgs(); I < ArgCount;
        ++I) {
     if (const auto *Record = dyn_cast<RecordType>(
             AsTemplateSpecT->getArg(I).getAsType().getTypePtr())) {
@@ -38,33 +38,55 @@ static std::string getBaseTypeAsString(const Type *Type) {
   return "";
 }
 
+static unsigned getCallExprArgNum(const CallExpr *CallExpr, const Expr *Expr) {
+  for (unsigned I = 0, ArgCount = CallExpr->getNumArgs(); I < ArgCount; ++I) {
+    if (Expr == CallExpr->getArg(I)) {
+      return I;
+    }
+  }
+  return 0;
+}
+
+struct A {};
+struct B : A {};
+void f(std::shared_ptr<A>){}
+
 void InefficientSharedPointerReferenceCheck::registerMatchers(
     MatchFinder *Finder) {
   // This checker only makes sense for C++11 and up.
   if (!getLangOpts().CPlusPlus11)
     return;
 
+  auto ptr = std::make_shared<B>();
+  std::shared_ptr<A> ptr2 = std::shared_ptr<A>(ptr);
+  f(ptr);
+
   // The *. regex is needed because shared_ptr could be in a namespace inside
   // std.
   const auto SharedPointerType = qualType(hasDeclaration(
       classTemplateSpecializationDecl(matchesName("std::.*shared_ptr"))));
-  const auto InefficientParameter = cxxBindTemporaryExpr(
+  const auto InefficientParameter = expr(ignoringImplicit(
       hasDescendant(implicitCastExpr(hasCastKind(CK_ConstructorConversion))
-                        .bind("impCast")),
+                        .bind("impCast"))),
       hasType(SharedPointerType));
   Finder->addMatcher(
       callExpr(has(InefficientParameter.bind("shared_ptr_parameter")),
                callee(functionDecl().bind("function")))
-          .bind("calleeFunc"),
+          .bind("callExpr"),
       this);
 }
 
 void InefficientSharedPointerReferenceCheck::check(
     const MatchFinder::MatchResult &Result) {
   const auto *SharedPtrParameter =
-      Result.Nodes.getNodeAs<CXXBindTemporaryExpr>("shared_ptr_parameter");
+      Result.Nodes.getNodeAs<Expr>("shared_ptr_parameter");
   const auto *Function = Result.Nodes.getNodeAs<FunctionDecl>("function");
   const auto *ImpCast = Result.Nodes.getNodeAs<ImplicitCastExpr>("impCast");
+  const auto *CallExpression = Result.Nodes.getNodeAs<CallExpr>("callExpr");
+
+  const auto ArgumentNum =
+      getCallExprArgNum(CallExpression, SharedPtrParameter->IgnoreImplicit());
+
   const auto *ConstructorConversion =
       dyn_cast<CXXConstructExpr>(ImpCast->getSubExpr());
   const auto *ConvertingConstructorTemplateParam =
@@ -82,7 +104,7 @@ void InefficientSharedPointerReferenceCheck::check(
   diag(SharedPtrParameter->getExprLoc(),
        "inefficient polymorphic cast of std::shared_ptr<" + DerivedType +
            "> to std::shared_ptr<" + BaseType + ">");
-  diag(Function->getSourceRange().getBegin(),
+  diag(Function->getParamDecl(ArgumentNum)->getLocStart(),
        "consider using const reference "
        "or raw pointer instead of "
        "'std::shared_ptr'",

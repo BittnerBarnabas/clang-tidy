@@ -47,10 +47,6 @@ static unsigned getCallExprArgNum(const CallExpr *CallExpr, const Expr *Expr) {
   return 0;
 }
 
-struct A {};
-struct B : A {};
-void f(std::shared_ptr<A>){}
-
 void InefficientSharedPointerReferenceCheck::registerMatchers(
     MatchFinder *Finder) {
   // This checker only makes sense for C++11 and up.

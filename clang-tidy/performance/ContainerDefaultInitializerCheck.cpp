@@ -188,6 +188,10 @@ static void formatArguments(const InsertionCall<N> ArgumentList,
 }
 
 void ContainerDefaultInitializerCheck::registerMatchers(MatchFinder *Finder) {
+  // This checker only makes sense for C++11 and up.
+  if (!getLangOpts().CPlusPlus11)
+    return;
+  
   const auto HasOperationsNamedDecl =
       hasDeclaration(namedDecl(matchesName(OperationsToMatchRegex)));
   const auto ContainterType =
@@ -223,9 +227,6 @@ void ContainerDefaultInitializerCheck::registerMatchers(MatchFinder *Finder) {
 
 void ContainerDefaultInitializerCheck::check(
     const MatchFinder::MatchResult &Result) {
-  // C++11 for initialization-list init
-  if (!Result.Context->getLangOpts().CPlusPlus11)
-    return;
   std::vector<int> vec1(1, 2);
   const auto *ContainerDeclaration =
       Result.Nodes.getNodeAs<VarDecl>("containerDecl");

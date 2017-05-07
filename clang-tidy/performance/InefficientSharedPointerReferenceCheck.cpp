@@ -53,10 +53,6 @@ void InefficientSharedPointerReferenceCheck::registerMatchers(
   if (!getLangOpts().CPlusPlus11)
     return;
 
-  auto ptr = std::make_shared<B>();
-  std::shared_ptr<A> ptr2 = std::shared_ptr<A>(ptr);
-  f(ptr);
-
   // The *. regex is needed because shared_ptr could be in a namespace inside
   // std.
   const auto SharedPointerType = qualType(hasDeclaration(

@@ -12,6 +12,14 @@ typedef integral_constant<bool, true> true_type;
 typedef integral_constant<bool, false> false_type;
 
 template <class T> struct add_rvalue_reference { typedef T &&type; };
+template <class T> struct remove_reference { typedef T type; };
+template <class T> struct remove_reference<T&> { typedef T type; };
+template <class T> struct remove_reference<T&&> { typedef T type; };
+
+template <class T>
+typename remove_reference<T>::type move(T&& tp) {
+  return static_cast<typename remove_reference<T>::type>(tp);
+}
 
 template <class T> typename add_rvalue_reference<T>::type declval();
 
@@ -26,21 +34,32 @@ struct is_convertible<_From, _To,
     : public true_type {};
 
 template<bool, class T = void> struct enable_if{};
+
 template<class T> struct enable_if<true, T> { typedef T value; };
 
 template<class T>
+class unique_ptr {
+
+};
+
+template<class T>
 class shared_ptr {
-  struct __nat { int bool_val; };
+  struct __nat {};
 public:
   shared_ptr(){}
   template<class _Yp>
   shared_ptr(const shared_ptr<_Yp>& __r, typename enable_if<is_convertible<_Yp*, T*>::value,__nat>::value = __nat());
+  template<class _Yp>
+  shared_ptr(unique_ptr<_Yp>&& __r, typename enable_if<is_convertible<_Yp*, T*>::value,__nat>::value = __nat());
   T* get(){ return new T(); };
 };
 
 template<class T>
-shared_ptr<T> make_shared() {return shared_ptr<T>();}
-}
+unique_ptr<T> make_unique() { return unique_ptr<T>(); }
+
+template<class T>
+shared_ptr<T> make_shared() { return shared_ptr<T>(); }
+} //End of std namespace
 
 struct Base {};
 struct Derived : Base {};
@@ -58,7 +77,7 @@ struct templatedShrtPtr {
   typedef std::shared_ptr<T> value;
 };
 
-void f1(std::shared_ptr<Base> ptr) {}
+void f1(std::shared_ptr<Base> ptr){}
 void f2(shrBasePtrTypedef ptr1){}
 void f3(std::shared_ptr<Base>, std::shared_ptr<Derived>){}
 void f4(std::shared_ptr<Derived>, std::shared_ptr<Base>){}
@@ -70,6 +89,10 @@ int main() {
   auto ptr3 = usingCica<Derived>();
   auto ptr4 = std::make_shared<Base>();
   auto ptr5 = std::make_shared<derivedType>();
+  auto ptr6 = std::make_unique<Derived>();
+
+  f1(std::move(ptr6));
+  f1(std::make_unique<Derived>());
 
   f5(*ptr1.get());
   f1(std::make_shared<Derived>());
@@ -85,5 +108,9 @@ int main() {
   f1(shrPtrTypedef());
   // CHECK-MESSAGES: :[[@LINE-1]]:6: warning: inefficient polymorphic cast of std::shared_ptr
   f1(ptr5);
+  // CHECK-MESSAGES: :[[@LINE-1]]:6: warning: inefficient polymorphic cast of std::shared_ptr
+  f1(ptr2);
+  // CHECK-MESSAGES: :[[@LINE-1]]:6: warning: inefficient polymorphic cast of std::shared_ptr
+  f1(ptr3);
   // CHECK-MESSAGES: :[[@LINE-1]]:6: warning: inefficient polymorphic cast of std::shared_ptr
 }

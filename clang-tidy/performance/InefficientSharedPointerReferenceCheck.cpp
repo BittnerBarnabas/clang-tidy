@@ -47,20 +47,30 @@ static unsigned getCallExprArgNum(const CallExpr *CallExpr, const Expr *Expr) {
   return 0;
 }
 
+static inline auto getQualTypeForTemplate(std::string &&str)
+    -> decltype(qualType()) {
+  // The *. regex is needed because shared_ptr could be in a namespace inside
+  // std.
+  return qualType(
+      hasDeclaration(classTemplateSpecializationDecl(matchesName(str))));
+}
+
 void InefficientSharedPointerReferenceCheck::registerMatchers(
     MatchFinder *Finder) {
   // This checker only makes sense for C++11 and up.
   if (!getLangOpts().CPlusPlus11)
     return;
 
-  // The *. regex is needed because shared_ptr could be in a namespace inside
-  // std.
-  const auto SharedPointerType = qualType(hasDeclaration(
-      classTemplateSpecializationDecl(matchesName("std::.*shared_ptr"))));
-  const auto InefficientParameter = expr(ignoringImplicit(
-      hasDescendant(implicitCastExpr(hasCastKind(CK_ConstructorConversion))
-                        .bind("impCast"))),
-      hasType(SharedPointerType));
+  const auto SharedPointerType = getQualTypeForTemplate("std::.*shared_ptr");
+  const auto UniquePointerType = getQualTypeForTemplate("std::.*unique_ptr");
+
+  const auto InefficientParameter =
+      expr(ignoringImplicit(hasDescendant(
+               implicitCastExpr(hasCastKind(CK_ConstructorConversion),
+                                unless(has(cxxConstructExpr(hasAnyArgument(
+                                    expr(hasType(UniquePointerType)))))))
+                   .bind("impCast"))),
+           hasType(SharedPointerType));
   Finder->addMatcher(
       callExpr(has(InefficientParameter.bind("shared_ptr_parameter")),
                callee(functionDecl().bind("function")))

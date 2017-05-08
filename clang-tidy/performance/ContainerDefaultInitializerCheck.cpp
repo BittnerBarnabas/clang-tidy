@@ -187,6 +187,16 @@ static void formatArguments(const InsertionCall<N> ArgumentList,
   }
 }
 
+static bool isInsertionCall(const CallExpr* CallExpr) {
+  if(CallExpr == nullptr)
+    return false;
+  const auto *InsertionMethodDecl = dyn_cast<CXXMethodDecl>(CallExpr->getCalleeDecl());
+  if(!InsertionMethodDecl)
+    return false;
+  llvm::Regex Reg(OperationsToMatchRegex);
+  return Reg.match(InsertionMethodDecl->getName());
+}
+
 void ContainerDefaultInitializerCheck::registerMatchers(MatchFinder *Finder) {
   // This checker only makes sense for C++11 and up.
   if (!getLangOpts().CPlusPlus11)
@@ -276,6 +286,7 @@ void ContainerDefaultInitializerCheck::check(
     const CXXMemberCallExpr *ActualMemberCallExpr;
     if (!(ActualMemberCallExpr = dyn_cast<CXXMemberCallExpr>(
               (*CompoundStmtIterator)->IgnoreImplicit())) ||
+        !isInsertionCall(ActualMemberCallExpr) ||
         ActualMemberCallExpr == DirtyMemberCall ||
         ActualMemberCallExpr->getImplicitObjectArgument()
                 ->getReferencedDeclOfCallee() != ContainerDeclaration) {

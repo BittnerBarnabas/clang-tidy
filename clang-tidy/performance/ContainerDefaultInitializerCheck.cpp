@@ -187,21 +187,33 @@ static void formatArguments(const InsertionCall<N> ArgumentList,
   }
 }
 
-static bool isInsertionCall(const CallExpr* CallExpr) {
-  if(CallExpr == nullptr)
+static bool isInsertionCall(const CallExpr *CallExpr) {
+  if (CallExpr == nullptr)
     return false;
-  const auto *InsertionMethodDecl = dyn_cast<CXXMethodDecl>(CallExpr->getCalleeDecl());
-  if(!InsertionMethodDecl)
+  const auto *InsertionMethodDecl =
+      dyn_cast<CXXMethodDecl>(CallExpr->getCalleeDecl());
+  if (!InsertionMethodDecl)
     return false;
   llvm::Regex Reg(OperationsToMatchRegex);
   return Reg.match(InsertionMethodDecl->getName());
+}
+
+const ast_matchers::internal::VariadicDynCastAllOfMatcher<Stmt,
+                                                          UnresolvedMemberExpr>
+    unresolvedMemberExpr;
+
+AST_MATCHER_P(UnresolvedMemberExpr, onBase,
+              ast_matchers::internal::Matcher<Expr>, InnerMatcher) {
+  const Expr *ExprNode = Node.getBase()->IgnoreParenImpCasts();
+  return (ExprNode != nullptr &&
+          InnerMatcher.matches(*ExprNode, Finder, Builder));
 }
 
 void ContainerDefaultInitializerCheck::registerMatchers(MatchFinder *Finder) {
   // This checker only makes sense for C++11 and up.
   if (!getLangOpts().CPlusPlus11)
     return;
-  
+
   const auto HasOperationsNamedDecl =
       hasDeclaration(namedDecl(matchesName(OperationsToMatchRegex)));
   const auto ContainterType =
@@ -224,6 +236,15 @@ void ContainerDefaultInitializerCheck::registerMatchers(MatchFinder *Finder) {
           hasAnyArgument(expr(hasDescendant(DeclRefExprToContainer))),
           on(DeclRefExprToContainer))
           .bind("dirtyMemberCallExpr");
+
+  const auto UnresolvedMemberExpr =
+      callExpr(has(unresolvedMemberExpr(onBase(DeclRefExprToContainer))))
+          .bind("unresolvedCallExpr");
+
+  Finder->addMatcher(
+      compoundStmt(forEach(expr(ignoringImplicit(UnresolvedMemberExpr))))
+          .bind("compoundStmt"),
+      this);
 
   Finder->addMatcher(compoundStmt(forEach(expr(ignoringImplicit(
                                       MemberCallExprWithRefToContainer))))
@@ -249,6 +270,8 @@ void ContainerDefaultInitializerCheck::check(
   const auto *DirtyMemberCall =
       Result.Nodes.getNodeAs<CXXMemberCallExpr>("dirtyMemberCallExpr");
   const auto *CompoundStmtIterator = CompoundStatement->body_begin();
+  const auto *UnresolvedCallExpr =
+      Result.Nodes.getNodeAs<CallExpr>("unresolvedCallExpr");
 
   const TemplateSpecializationType *ContainerTemplateParameters;
   const auto *ContainerType = ContainerDeclaration->getType().getTypePtr();
@@ -287,6 +310,7 @@ void ContainerDefaultInitializerCheck::check(
     if (!(ActualMemberCallExpr = dyn_cast<CXXMemberCallExpr>(
               (*CompoundStmtIterator)->IgnoreImplicit())) ||
         !isInsertionCall(ActualMemberCallExpr) ||
+        ActualMemberCallExpr == UnresolvedCallExpr ||
         ActualMemberCallExpr == DirtyMemberCall ||
         ActualMemberCallExpr->getImplicitObjectArgument()
                 ->getReferencedDeclOfCallee() != ContainerDeclaration) {

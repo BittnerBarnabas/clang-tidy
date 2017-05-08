@@ -1,5 +1,4 @@
 // RUN: %check_clang_tidy %s performance-container-default-initializer %t -- -- -std=c++11
-
 namespace std {
 
 template <typename T>
@@ -47,11 +46,16 @@ public:
   vector(){}
   vector(initializer_list<T> ){}
   vector(int, int){}
+  class iterator {};
+  void insert(iterator, iterator, iterator){}
+  iterator begin() { return iterator();}
+  iterator end() { return iterator(); }
   template<class ...T2>
   void emplace_back(T2&& ...){}
   template<class T2>
   void push_back(T2&&){}
   int size(){return 0;}
+  void reserve(int){}
 };
 
 template<class T>
@@ -68,7 +72,23 @@ public:
 template<class T1, class T2>
 static pair<T1,T2> make_pair(const T1&, const T2&){ return pair<T1,T2>(); }
 
-} // end of STD namespace
+} // end of STD namespace*/
+
+template<int N>
+class TemplateType {
+  int a = N;
+public:
+  int size(){return N;}
+};
+
+template<int N>
+void f4(TemplateType<N>& t) {
+  std::vector<int> vec1;
+  // CHECK-MESSAGES: :[[@LINE-1]]:3: warning: Initialize containers in place
+  // CHECK-FIXES: {{.*}}std::vector<int> vec1{4};{{$}}
+  vec1.push_back(4);
+  vec1.push_back(t.size());
+}
 
 class MyObj{
 public:
@@ -246,5 +266,28 @@ int main() {
     map2.emplace(3,1);
     map2.insert({a < b ? f1(a) : f2(b), 3});
     map2.insert({3.2, 1.2});
+  }
+  {
+    std::vector<int> vec1{2,3,4};
+    std::vector<int> vec2;
+    vec2.insert(vec2.end(), vec1.begin(), vec1.end());
+    vec2.reserve(1 + vec1.size());
+    vec2.push_back(4);
+    std::map<int,int>map1;
+    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: Initialize containers in place
+    // CHECK-FIXES: {{.*}}std::map<int,int>map1{{[{][{]}}1,2{{[}][}]}};{{$}}
+    map1.insert({1,2});
+  }
+  {
+    std::vector<int> vec1{2,3,4};
+    std::vector<int> vec2;
+    // CHECK-MESSAGES: :[[@LINE-1]]:5: warning: Initialize containers in place
+    // CHECK-FIXES: {{.*}}std::vector<int> vec2{4, f1(vec1.size())};{{$}}
+    vec2.push_back(4);
+    vec2.push_back(f1(vec1.size()));
+    TemplateType<5> t1{};
+    TemplateType<4> t2{};
+    f4(t1);
+    f4(t2);
   }
 }

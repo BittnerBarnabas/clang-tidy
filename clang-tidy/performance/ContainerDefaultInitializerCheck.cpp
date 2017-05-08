@@ -241,17 +241,23 @@ void ContainerDefaultInitializerCheck::registerMatchers(MatchFinder *Finder) {
       callExpr(has(unresolvedMemberExpr(onBase(DeclRefExprToContainer))))
           .bind("unresolvedCallExpr");
 
+  const auto HasInstantiatedDeclAncestor = hasAncestor(decl(isInstantiated()));
+
   Finder->addMatcher(
-      compoundStmt(forEach(expr(ignoringImplicit(UnresolvedMemberExpr))))
+      compoundStmt(unless(HasInstantiatedDeclAncestor),
+                   forEach(expr(ignoringImplicit(UnresolvedMemberExpr))))
           .bind("compoundStmt"),
       this);
 
-  Finder->addMatcher(compoundStmt(forEach(expr(ignoringImplicit(
+  Finder->addMatcher(compoundStmt(unless(HasInstantiatedDeclAncestor),
+                                  forEach(expr(ignoringImplicit(
                                       MemberCallExprWithRefToContainer))))
                          .bind("compoundStmt"),
                      this);
+
   Finder->addMatcher(
-      compoundStmt(forEach(expr(ignoringImplicit(MemberCallExpr))))
+      compoundStmt(unless(HasInstantiatedDeclAncestor),
+                   forEach(expr(ignoringImplicit(MemberCallExpr))))
           .bind("compoundStmt"),
       this);
 }

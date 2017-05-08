@@ -8,6 +8,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "InefficientStreamUseCheck.h"
+#include <iostream>
 
 using namespace clang::ast_matchers;
 
@@ -45,6 +46,14 @@ void InefficientStreamUseCheck::registerMatchers(MatchFinder *Finder) {
   const auto CharArrayToCharImplicitCast = implicitCastExpr(
       ImplicitCastFromConstCharPtr, ImplicitCastToStringLiteral,
       hasAncestor(cxxOperatorCallExpr()));
+  const auto OstreamTypedExpr = expr(hasType(qualType(
+      hasDeclaration(namedDecl(matchesName("std::.*basic_ostream"))))));
+
+  const auto CharArrayStreamMatcher =
+      cxxOperatorCallExpr(hasOverloadedOperatorName("<<"),
+                          hasAnyArgument(CharArrayToCharImplicitCast),
+                          hasAnyArgument(OstreamTypedExpr))
+          .bind("operator");
 
   const auto StdEndlineFunctionReference = ignoringImpCasts(
       declRefExpr(hasDeclaration(functionDecl(hasName("std::endl"))))
@@ -57,7 +66,7 @@ void InefficientStreamUseCheck::registerMatchers(MatchFinder *Finder) {
                               hasAnyArgument(StdEndlineFunctionReference))));
 
   Finder->addMatcher(MultipleEndlineMatcher, this);
-  Finder->addMatcher(CharArrayToCharImplicitCast, this);
+  Finder->addMatcher(CharArrayStreamMatcher, this);
 }
 
 void InefficientStreamUseCheck::check(const MatchFinder::MatchResult &Result) {

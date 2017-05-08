@@ -89,6 +89,13 @@ void f4(TemplateType<N>& t) {
   vec1.push_back(4);
   vec1.push_back(t.size());
 }
+template<int N>
+void f5(TemplateType<N>& t) {
+  std::vector<int> vec1;
+  vec1.push_back(t.size());
+  vec1.push_back(4);
+  vec1.push_back(t.size());
+}
 
 class MyObj{
 public:
@@ -289,5 +296,6 @@ int main() {
     TemplateType<4> t2{};
     f4(t1);
     f4(t2);
+    f5(t2);
   }
 }

@@ -204,9 +204,11 @@ const ast_matchers::internal::VariadicDynCastAllOfMatcher<Stmt,
 
 AST_MATCHER_P(UnresolvedMemberExpr, onBase,
               ast_matchers::internal::Matcher<Expr>, InnerMatcher) {
+  if(Node.isImplicitAccess())
+    return false;
+
   const Expr *ExprNode = Node.getBase()->IgnoreParenImpCasts();
-  return (ExprNode != nullptr &&
-          InnerMatcher.matches(*ExprNode, Finder, Builder));
+  return InnerMatcher.matches(*ExprNode, Finder, Builder);
 }
 
 void ContainerDefaultInitializerCheck::registerMatchers(MatchFinder *Finder) {

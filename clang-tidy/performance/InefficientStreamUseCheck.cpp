@@ -16,7 +16,7 @@ namespace clang {
 namespace tidy {
 namespace performance {
 
-static inline StringRef getEscapedString(StringRef StrRef) {
+static inline StringRef getEscapedChar(StringRef StrRef) {
   switch (StrRef.str()[0]) {
   case '\n':
     return "\\n";
@@ -38,6 +38,7 @@ static inline StringRef getEscapedString(StringRef StrRef) {
     return StrRef;
   }
 }
+
 void InefficientStreamUseCheck::registerMatchers(MatchFinder *Finder) {
   const auto ImplicitCastFromConstCharPtr =
       hasImplicitDestinationType(asString("const char *"));
@@ -76,7 +77,7 @@ void InefficientStreamUseCheck::check(const MatchFinder::MatchResult &Result) {
 
   if (ToCharCastedString) {
     const std::string ReplacementSuggestion =
-        (Twine{"\'"} + getEscapedString(ToCharCastedString->getString()) + "\'")
+        (Twine{"\'"} + getEscapedChar(ToCharCastedString->getString()) + "\'")
             .str();
     diag(ToCharCastedString->getExprLoc(),
          "Inefficient cast from const "

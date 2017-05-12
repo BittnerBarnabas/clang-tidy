@@ -218,6 +218,7 @@ void ContainerDefaultInitializerCheck::registerMatchers(MatchFinder *Finder) {
 
   const auto HasOperationsNamedDecl =
       hasDeclaration(namedDecl(matchesName(OperationsToMatchRegex)));
+
   const auto ContainterType =
       classTemplateSpecializationDecl(matchesName(ContainersToMatchRegex));
 

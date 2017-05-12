@@ -17,6 +17,7 @@ namespace performance {
 
 static std::string getBaseTypeAsString(const Type *Type) {
   const TemplateSpecializationType *AsTemplateSpecT;
+
   if (const auto *ElaboratedT = dyn_cast<ElaboratedType>(Type)) {
     AsTemplateSpecT = dyn_cast<TemplateSpecializationType>(
         ElaboratedT->getLocallyUnqualifiedSingleStepDesugaredType());
@@ -47,10 +48,8 @@ static unsigned getCallExprArgNum(const CallExpr *CallExpr, const Expr *Expr) {
   return 0;
 }
 
-static inline auto getQualTypeForTemplate(std::string &&str)
+static inline auto getQualTypeForTemplate(const std::string &str)
     -> decltype(qualType()) {
-  // The *. regex is needed because shared_ptr could be in a namespace inside
-  // std.
   return qualType(
       hasDeclaration(classTemplateSpecializationDecl(matchesName(str))));
 }
@@ -61,6 +60,8 @@ void InefficientSharedPointerReferenceCheck::registerMatchers(
   if (!getLangOpts().CPlusPlus11)
     return;
 
+  // The *. regex is needed because shared_ptr could be in a namespace inside
+  // std.
   const auto SharedPointerType = getQualTypeForTemplate("std::.*shared_ptr");
   const auto UniquePointerType = getQualTypeForTemplate("std::.*unique_ptr");
 
@@ -71,6 +72,7 @@ void InefficientSharedPointerReferenceCheck::registerMatchers(
                                     expr(hasType(UniquePointerType)))))))
                    .bind("impCast"))),
            hasType(SharedPointerType));
+
   Finder->addMatcher(
       callExpr(has(InefficientParameter.bind("shared_ptr_parameter")),
                callee(functionDecl().bind("function")))
@@ -91,6 +93,7 @@ void InefficientSharedPointerReferenceCheck::check(
 
   const auto *ConstructorConversion =
       dyn_cast<CXXConstructExpr>(ImpCast->getSubExpr());
+
   const auto *ConvertingConstructorTemplateParam =
       dyn_cast<RecordType>(ConstructorConversion->getConstructor()
                                ->getAsFunction()
@@ -100,6 +103,7 @@ void InefficientSharedPointerReferenceCheck::check(
                                .getTypePtr());
   const auto DerivedType =
       ConvertingConstructorTemplateParam->getDecl()->getName().str();
+
   const auto BaseType =
       getBaseTypeAsString(SharedPtrParameter->getType().getTypePtr());
 

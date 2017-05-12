@@ -42,11 +42,14 @@ static inline StringRef getEscapedChar(StringRef StrRef) {
 void InefficientStreamUseCheck::registerMatchers(MatchFinder *Finder) {
   const auto ImplicitCastFromConstCharPtr =
       hasImplicitDestinationType(asString("const char *"));
+
   const auto ImplicitCastToStringLiteral = hasSourceExpression(
       stringLiteral(hasSize(1)).bind("sourceStringLiteral"));
+
   const auto CharArrayToCharImplicitCast = implicitCastExpr(
       ImplicitCastFromConstCharPtr, ImplicitCastToStringLiteral,
       hasAncestor(cxxOperatorCallExpr()));
+
   const auto OstreamTypedExpr = expr(hasType(qualType(
       hasDeclaration(namedDecl(matchesName("std::.*basic_ostream"))))));
 
@@ -59,6 +62,7 @@ void InefficientStreamUseCheck::registerMatchers(MatchFinder *Finder) {
   const auto StdEndlineFunctionReference = ignoringImpCasts(
       declRefExpr(hasDeclaration(functionDecl(hasName("std::endl"))))
           .bind("endline"));
+
   const auto MultipleEndlineMatcher =
       cxxOperatorCallExpr(hasOverloadedOperatorName("<<"),
                           hasAnyArgument(StdEndlineFunctionReference),
@@ -73,6 +77,7 @@ void InefficientStreamUseCheck::registerMatchers(MatchFinder *Finder) {
 void InefficientStreamUseCheck::check(const MatchFinder::MatchResult &Result) {
   const auto *ToCharCastedString =
       Result.Nodes.getNodeAs<StringLiteral>("sourceStringLiteral");
+
   const auto *EndlineRef = Result.Nodes.getNodeAs<DeclRefExpr>("endline");
 
   if (ToCharCastedString) {
